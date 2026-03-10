@@ -35,6 +35,7 @@ def get_video_stream_params(bitrate=2500, force_cpu=False):
         ]
         video_args = [
             '-c:v', 'h264_vaapi',
+            '-profile:v', 'main',  # Perfil más compatible para Radeon
             '-b:v', f'{bitrate}k',
             '-maxrate', f'{bitrate}k',
             '-bufsize', f'{bitrate*2}k',
@@ -1284,29 +1285,32 @@ def transmitir_canal(canal_id):
             from .config_manager import config_manager
             video_cfg = config_manager.get_video_config()
             
-            if video_cfg.get('hardware_accel') == 'gpu':
-                # Parámetros de video (GPU/CPU) en modo compatible
-                hw_args, video_args_gpu, use_gpu = get_video_stream_params(bitrate=bitrate)
-                
+            # Configuración de codificación (GPU/CPU)
+            hw_args, video_params, use_gpu = get_video_stream_params(bitrate=bitrate)
+            
+            if use_gpu:
                 # Insertar hw_args al principio (después de ffmpeg)
                 for i, arg in enumerate(hw_args):
                     ffmpeg_cmd.insert(i+1, arg)
                 
-                # Asegurar carga de frames a GPU (VAAPI) en los filtros
+                # Adaptar filtros para GPU (NV12 + HWUPLOAD)
                 for idx, item in enumerate(ffmpeg_cmd):
                     if item == '-vf':
                         ffmpeg_cmd[idx+1] = f"{ffmpeg_cmd[idx+1]},format=nv12,hwupload"
                         break
-                
-                ffmpeg_cmd.extend(video_args_gpu)
-                ffmpeg_cmd.extend([
-                    '-c:a', 'aac',
-                    '-b:a', '192k',
-                    '-ar', '44100',
-                    '-ac', '2',
-                    '-f', 'flv',
-                    rtmp_url
-                ])
+            
+            # Agregar el codec de video y presets
+            ffmpeg_cmd.extend(video_params)
+            
+            # Parametros comunes de salida (Audio, Formato, URL)
+            ffmpeg_cmd.extend([
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-ar', '44100',
+                '-ac', '2',
+                '-f', 'flv',
+                rtmp_url
+            ])
             
             # Mostrar el comando completo para depuración
             print("Comando FFmpeg:", ' '.join(ffmpeg_cmd))
@@ -1605,39 +1609,37 @@ def transmitir_canal(canal_id):
 
             # Parametros de video (GPU/CPU)
             hw_args, video_args, use_gpu = get_video_stream_params()
+            target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+            
             if use_gpu:
-                # Insertar hw_args al principio (despues de ffmpeg)
+                # Insertar hw_args al principio
                 for i, arg in enumerate(hw_args):
-                    if 'cmd' in locals(): cmd.insert(i+1, arg)
-                    elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
+                    target_cmd.insert(i+1, arg)
                 
-                
-                # Asegurar carga de frames a GPU (VAAPI)
-                target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+                # Adaptar o crear filtros para GPU
                 vf_exists = False
                 for idx, item in enumerate(target_cmd):
                     if item == '-vf':
-                        # Ya hay filtros, agregamos el formato y carga al final
-                        current_vf = target_cmd[idx+1]
-                        if 'hwupload' not in current_vf:
-                            target_cmd[idx+1] = f"{current_vf},format=nv12,hwupload"
+                        target_cmd[idx+1] = f"{target_cmd[idx+1]},format=nv12,hwupload"
                         vf_exists = True
                         break
-                
                 if not vf_exists:
-                    # No habia filtros, creamos uno basico para la GPU
-                    # Encontrar el indice despues del input (-i path)
                     try:
-                        input_idx = target_cmd.index('-i')
-                        target_cmd.insert(input_idx + 2, '-vf')
-                        target_cmd.insert(input_idx + 3, 'format=nv12,hwupload')
-                    except:
-                        # Fallback: meterlo antes del encoder
-                        pass
+                        idx_i = target_cmd.index('-i')
+                        target_cmd.insert(idx_i + 2, '-vf')
+                        target_cmd.insert(idx_i + 3, 'format=nv12,hwupload')
+                    except: pass
 
-            # Agregar los parametros de codificacion
-            if 'cmd' in locals(): cmd.extend(video_args)
-            elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
+            # Agregar parametros de codificacion y SALIDA (Audio/RTMP)
+            target_cmd.extend(video_args)
+            target_cmd.extend([
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-ar', '44100',
+                '-ac', '2',
+                '-f', 'flv',
+                rtmp_url if 'rtmp_url' in locals() else (rtmp_server + '/live/' + nombre_stream)
+            ])
         
         try:
             # Iniciar el proceso FFmpeg
@@ -1948,39 +1950,37 @@ def transmitir_canal(canal_id):
 
             # Parametros de video (GPU/CPU)
             hw_args, video_args, use_gpu = get_video_stream_params()
+            target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+            
             if use_gpu:
-                # Insertar hw_args al principio (despues de ffmpeg)
+                # Insertar hw_args al principio
                 for i, arg in enumerate(hw_args):
-                    if 'cmd' in locals(): cmd.insert(i+1, arg)
-                    elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
+                    target_cmd.insert(i+1, arg)
                 
-                
-                # Asegurar carga de frames a GPU (VAAPI)
-                target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+                # Adaptar o crear filtros para GPU
                 vf_exists = False
                 for idx, item in enumerate(target_cmd):
                     if item == '-vf':
-                        # Ya hay filtros, agregamos el formato y carga al final
-                        current_vf = target_cmd[idx+1]
-                        if 'hwupload' not in current_vf:
-                            target_cmd[idx+1] = f"{current_vf},format=nv12,hwupload"
+                        target_cmd[idx+1] = f"{target_cmd[idx+1]},format=nv12,hwupload"
                         vf_exists = True
                         break
-                
                 if not vf_exists:
-                    # No habia filtros, creamos uno basico para la GPU
-                    # Encontrar el indice despues del input (-i path)
                     try:
-                        input_idx = target_cmd.index('-i')
-                        target_cmd.insert(input_idx + 2, '-vf')
-                        target_cmd.insert(input_idx + 3, 'format=nv12,hwupload')
-                    except:
-                        # Fallback: meterlo antes del encoder
-                        pass
+                        idx_i = target_cmd.index('-i')
+                        target_cmd.insert(idx_i + 2, '-vf')
+                        target_cmd.insert(idx_i + 3, 'format=nv12,hwupload')
+                    except: pass
 
-            # Agregar los parametros de codificacion
-            if 'cmd' in locals(): cmd.extend(video_args)
-            elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
+            # Agregar parametros de codificacion y SALIDA (Audio/RTMP)
+            target_cmd.extend(video_args)
+            target_cmd.extend([
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-ar', '44100',
+                '-ac', '2',
+                '-f', 'flv',
+                rtmp_url if 'rtmp_url' in locals() else (rtmp_server + '/live/' + nombre_stream)
+            ])
             
             print(f"Iniciando transmisión con comando: {' '.join(cmd)}")
             
