@@ -370,11 +370,9 @@ def transcode_video(input_path, output_path, config=None, task_id=None):
     def build_gpu_cmd():
         return [
             'ffmpeg', '-y', '-nostdin',
-            '-hwaccel', 'vaapi',
-            '-hwaccel_device', gpu_device,
-            '-hwaccel_output_format', 'vaapi',
+            '-vaapi_device', gpu_device,
             '-i', input_path,
-            '-vf', 'scale_vaapi=w=iw:h=ih,format=nv12|vaapi',
+            '-vf', 'format=nv12,hwupload',
             '-c:v', 'h264_vaapi',
             *audio_params,
             '-movflags', '+faststart',

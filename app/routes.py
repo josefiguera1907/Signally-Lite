@@ -28,10 +28,10 @@ def get_video_stream_params(bitrate=2500, force_cpu=False):
     
     hw_args = []
     if use_gpu:
+        # En modo ultra-compatible para Radeon, solo usamos VAAPI para ENCODING.
+        # Esto evita errores de kernel al decodificar o filtrar.
         hw_args = [
-            '-hwaccel', 'vaapi', 
-            '-hwaccel_device', gpu_device
-            # Eliminamos -hwaccel_output_format vaapi por compatibilidad con Radeon/LXC
+            '-vaapi_device', gpu_device
         ]
         video_args = [
             '-c:v', 'h264_vaapi',
@@ -1285,39 +1285,26 @@ def transmitir_canal(canal_id):
             video_cfg = config_manager.get_video_config()
             
             if video_cfg.get('hardware_accel') == 'gpu':
-                gpu_device = video_cfg.get('gpu_device', '/dev/dri/renderD128')
-                # Insertar flags de aceleración al inicio (después de -i si es una entrada, pero aquí construimos la lista)
-                # FFmpeg necesita los flags de hardware antes o después del input dependiendo del modo.
-                # Para h264_vaapi en stream en vivo:
-                ffmpeg_cmd.insert(1, '-hwaccel')
-                ffmpeg_cmd.insert(2, 'vaapi')
-                ffmpeg_cmd.insert(3, '-hwaccel_device')
-                ffmpeg_cmd.insert(4, gpu_device)
-                ffmpeg_cmd.insert(5, '-hwaccel_output_format')
-                ffmpeg_cmd.insert(6, 'vaapi')
+                # Parámetros de video (GPU/CPU) en modo compatible
+                hw_args, video_args_gpu, use_gpu = get_video_stream_params(bitrate=bitrate)
                 
-                # Cambiar encoder y filtros
-                # Buscamos el filtro de escala que ya fue agregado antes y lo cambiamos por el de vaapi
+                # Insertar hw_args al principio (después de ffmpeg)
+                for i, arg in enumerate(hw_args):
+                    ffmpeg_cmd.insert(i+1, arg)
+                
+                # Asegurar carga de frames a GPU (VAAPI) en los filtros
                 for idx, item in enumerate(ffmpeg_cmd):
                     if item == '-vf':
-                        ffmpeg_cmd[idx+1] = ffmpeg_cmd[idx+1].replace('yuv420p', 'nv12')
+                        ffmpeg_cmd[idx+1] = f"{ffmpeg_cmd[idx+1]},format=nv12,hwupload"
+                        break
                 
+                ffmpeg_cmd.extend(video_args_gpu)
                 ffmpeg_cmd.extend([
-                    '-c:v', 'h264_vaapi',
-                    '-preset', 'veryfast',
-                    '-tune', 'zerolatency',
-                    '-b:v', bitrate_str,  # Bitrate configurado por el usuario
-                    '-maxrate', maxrate_str,  # Bitrate máximo igual al configurado
-                    '-bufsize', bufsize_str,  # Buffer = 2x el bitrate
-                    '-g', '60',  # Keyframe cada 2 segundos (a 30fps)
-                    '-keyint_min', '60',  # Mínimo de frames entre keyframes
-                    '-sc_threshold', '0',  # Deshabilitar detección de escenas
-                    '-pix_fmt', 'yuv420p',  # Formato de píxel compatible
-                    '-c:a', 'aac',  # Códec de audio
-                    '-b:a', '192k',  # Aumentado de 128k a 192k para mejor calidad de audio
-                    '-ar', '44100',  # Frecuencia de muestreo de audio
-                    '-ac', '2',  # Audio estéreo
-                    '-f', 'flv',  # Formato de salida
+                    '-c:a', 'aac',
+                    '-b:a', '192k',
+                    '-ar', '44100',
+                    '-ac', '2',
+                    '-f', 'flv',
                     rtmp_url
                 ])
             
@@ -1624,12 +1611,30 @@ def transmitir_canal(canal_id):
                     if 'cmd' in locals(): cmd.insert(i+1, arg)
                     elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
                 
-                # Buscar y adaptar filtros -vf
+                
+                # Asegurar carga de frames a GPU (VAAPI)
                 target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+                vf_exists = False
                 for idx, item in enumerate(target_cmd):
                     if item == '-vf':
-                        target_cmd[idx+1] = target_cmd[idx+1].replace('yuv420p', 'nv12')
-            
+                        # Ya hay filtros, agregamos el formato y carga al final
+                        current_vf = target_cmd[idx+1]
+                        if 'hwupload' not in current_vf:
+                            target_cmd[idx+1] = f"{current_vf},format=nv12,hwupload"
+                        vf_exists = True
+                        break
+                
+                if not vf_exists:
+                    # No habia filtros, creamos uno basico para la GPU
+                    # Encontrar el indice despues del input (-i path)
+                    try:
+                        input_idx = target_cmd.index('-i')
+                        target_cmd.insert(input_idx + 2, '-vf')
+                        target_cmd.insert(input_idx + 3, 'format=nv12,hwupload')
+                    except:
+                        # Fallback: meterlo antes del encoder
+                        pass
+
             # Agregar los parametros de codificacion
             if 'cmd' in locals(): cmd.extend(video_args)
             elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
@@ -1949,12 +1954,30 @@ def transmitir_canal(canal_id):
                     if 'cmd' in locals(): cmd.insert(i+1, arg)
                     elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
                 
-                # Buscar y adaptar filtros -vf
+                
+                # Asegurar carga de frames a GPU (VAAPI)
                 target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+                vf_exists = False
                 for idx, item in enumerate(target_cmd):
                     if item == '-vf':
-                        target_cmd[idx+1] = target_cmd[idx+1].replace('yuv420p', 'nv12')
-            
+                        # Ya hay filtros, agregamos el formato y carga al final
+                        current_vf = target_cmd[idx+1]
+                        if 'hwupload' not in current_vf:
+                            target_cmd[idx+1] = f"{current_vf},format=nv12,hwupload"
+                        vf_exists = True
+                        break
+                
+                if not vf_exists:
+                    # No habia filtros, creamos uno basico para la GPU
+                    # Encontrar el indice despues del input (-i path)
+                    try:
+                        input_idx = target_cmd.index('-i')
+                        target_cmd.insert(input_idx + 2, '-vf')
+                        target_cmd.insert(input_idx + 3, 'format=nv12,hwupload')
+                    except:
+                        # Fallback: meterlo antes del encoder
+                        pass
+
             # Agregar los parametros de codificacion
             if 'cmd' in locals(): cmd.extend(video_args)
             elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
@@ -2253,24 +2276,41 @@ def transmitir_canal(canal_id):
         if vf_filters:
             cmd.extend(['-vf', ','.join(vf_filters)])
             
-
-            # Parametros de video (GPU/CPU)
-            hw_args, video_args, use_gpu = get_video_stream_params()
-            if use_gpu:
-                # Insertar hw_args al principio (despues de ffmpeg)
-                for i, arg in enumerate(hw_args):
-                    if 'cmd' in locals(): cmd.insert(i+1, arg)
-                    elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
-                
-                # Buscar y adaptar filtros -vf
-                target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
-                for idx, item in enumerate(target_cmd):
-                    if item == '-vf':
-                        target_cmd[idx+1] = target_cmd[idx+1].replace('yuv420p', 'nv12')
+        # Parametros de video (GPU/CPU)
+        hw_args, video_args, use_gpu = get_video_stream_params()
+        if use_gpu:
+            # Insertar hw_args al principio (despues de ffmpeg)
+            for i, arg in enumerate(hw_args):
+                if 'cmd' in locals(): cmd.insert(i+1, arg)
+                elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
             
-            # Agregar los parametros de codificacion
-            if 'cmd' in locals(): cmd.extend(video_args)
-            elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
+            
+            # Asegurar carga de frames a GPU (VAAPI)
+            target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+            vf_exists = False
+            for idx, item in enumerate(target_cmd):
+                if item == '-vf':
+                    # Ya hay filtros, agregamos el formato y carga al final
+                    current_vf = target_cmd[idx+1]
+                    if 'hwupload' not in current_vf:
+                        target_cmd[idx+1] = f"{current_vf},format=nv12,hwupload"
+                    vf_exists = True
+                    break
+            
+            if not vf_exists:
+                # No habia filtros, creamos uno basico para la GPU
+                # Encontrar el indice despues del input (-i path)
+                try:
+                    input_idx = target_cmd.index('-i')
+                    target_cmd.insert(input_idx + 2, '-vf')
+                    target_cmd.insert(input_idx + 3, 'format=nv12,hwupload')
+                except:
+                    # Fallback: meterlo antes del encoder
+                    pass
+
+        # Agregar los parametros de codificacion
+        if 'cmd' in locals(): cmd.extend(video_args)
+        elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
         
         # Imprimir el comando completo para depuración
         print("Comando FFmpeg:", ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd))
