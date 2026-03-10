@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,34 +21,42 @@
             transition: all 0.2s ease;
             border: 1px solid transparent;
         }
+
         .btn-actions:hover {
             transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
+
         .btn-edit {
             background-color: #e7f1ff;
             color: #0d6efd;
         }
+
         .btn-edit:hover {
             background-color: #d0e2ff;
             border-color: #9ec5fe;
         }
+
         .btn-delete {
             background-color: #f8d7da;
             color: #dc3545;
         }
+
         .btn-delete:hover {
             background-color: #f1aeb5;
             border-color: #ea868f;
         }
+
         .btn-transmit {
             background-color: #d1e7dd;
             color: #198754;
         }
+
         .btn-transmit:hover {
             background-color: #a3cfbb;
             border-color: #75b798;
         }
+
         .table-actions {
             white-space: nowrap;
             width: 1%;
@@ -57,41 +66,143 @@
     <!-- Estilos personalizados -->
     <style>
         body {
-            padding-top: 56px;
+            padding-top: 76px;
+            padding-bottom: 40px;
         }
+
         .navbar-brand {
             font-weight: bold;
         }
+
         .footer {
             background-color: #f8f9fa;
             padding: 20px 0;
             margin-top: 40px;
         }
+
         .card {
             display: flex;
             flex-direction: column;
             height: 100%;
         }
+
         .card-body {
             flex: 1;
             display: flex;
             flex-direction: column;
-        }
-        .card-body {
             position: relative;
-            padding-bottom: 3.5rem; /* Espacio para el botón */
+            padding-bottom: 3.5rem;
+            /* Espacio para el botón */
         }
+
         .card-body .btn {
             position: absolute;
             bottom: 1.25rem;
             left: 50%;
             transform: translateX(-50%);
             white-space: nowrap;
-            margin-top: 1rem; /* Espacio adicional arriba del botón */
+            margin-top: 1rem;
+        }
+
+        /* ── Floating Button & Stats Widget Styles ── */
+        .btn-float-stats {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: #0d6efd;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            box-shadow: 0 4px 12px rgba(13, 110, 253, 0.3);
+            border: none;
+            z-index: 1050;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .btn-float-stats:hover {
+            transform: scale(1.1) rotate(15deg);
+            box-shadow: 0 6px 16px rgba(13, 110, 253, 0.4);
+            color: white;
+        }
+
+        .btn-float-stats.active {
+            transform: scale(0) rotate(-45deg);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #statsWidget {
+            display: none;
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 320px;
+            z-index: 1055;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+            border-radius: 16px;
+            overflow: hidden;
+            background: var(--bs-body-bg, #fff);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            animation: slideUpIn .25s cubic-bezier(0.165, 0.84, 0.44, 1);
+        }
+
+        @keyframes slideUpIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .hw-bar-wrap {
+            margin-bottom: 12px;
+        }
+
+        .hw-bar-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: .8rem;
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+
+        .hw-bar {
+            height: 8px;
+            border-radius: 99px;
+            background: rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+
+        .hw-bar-fill {
+            height: 100%;
+            border-radius: 99px;
+            transition: width .5s ease;
+        }
+
+        .hw-bar-fill.low {
+            background: linear-gradient(90deg, #198754, #20c997);
+        }
+
+        .hw-bar-fill.mid {
+            background: linear-gradient(90deg, #fd7e14, #ffc107);
+        }
+
+        .hw-bar-fill.high {
+            background: linear-gradient(90deg, #dc3545, #e35d6a);
         }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
+
 <body>
     <!-- Barra de navegación -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
@@ -120,17 +231,18 @@
     <main class="container">
         <div id="cpu-warning-alert" class="alert alert-warning d-none" role="alert">
             <i class="fas fa-exclamation-triangle me-2"></i>
-            <strong>Alto consumo de recursos detectado.</strong> Se recomienda esperar a que todo el contenido se haya procesado para un rendimiento óptimo.
+            <strong>Alto consumo de recursos detectado.</strong> Se recomienda esperar a que todo el contenido se haya
+            procesado para un rendimiento óptimo.
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} mt-3">
-                        {{ message }}
-                    </div>
-                {% endfor %}
-            {% endif %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-3">
+            {{ message }}
+        </div>
+        {% endfor %}
+        {% endif %}
         {% endwith %}
 
         {% block content %}{% endblock %}
@@ -143,36 +255,143 @@
         </div>
     </footer>
 
+    <!-- ── Botón flotante y Widget de Estadísticas GLOBAL ── -->
+    <button class="btn-float-stats" id="btnStats" onclick="toggleStats()" title="Ver estadísticas de hardware">
+        <i class="fas fa-chart-line"></i>
+    </button>
+
+    <div id="statsWidget">
+        <div
+            style="background: #0d6efd; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="color:#fff; font-weight:600; font-size:.95rem;">
+                <i class="fas fa-tachometer-alt me-2"></i>Estado del Hardware
+            </span>
+            <button onclick="closeStats()"
+                style="background:none; border:none; color:#fff; font-size:1.2rem; cursor:pointer; padding:0;"
+                title="Cerrar">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div style="padding: 16px 20px;" id="statsBody">
+            <div class="d-flex justify-content-center py-2">
+                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                <span class="ms-2 small text-muted">Cargando...</span>
+            </div>
+        </div>
+    </div>
+
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
     <!-- Bootstrap JS y dependencias -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const cpuAlert = document.getElementById('cpu-warning-alert');
 
-            function checkCpuUsage() {
-                fetch('/api/system/stats')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success && data.cpu_percent > 75) {
-                            cpuAlert.classList.remove('d-none');
-                        } else {
-                            cpuAlert.classList.add('d-none');
+    <script>
+        /* ── Lógica de Estadísticas Globales ── */
+        let _statsInterval = null;
+        const cpuAlert = document.getElementById('cpu-warning-alert');
+
+        function barColor(pct) {
+            if (pct < 60) return 'low';
+            if (pct < 85) return 'mid';
+            return 'high';
+        }
+
+        function barHtml(label, icon, pct, subtitle) {
+            const pctSafe = Math.min(100, Math.max(0, pct ?? 0));
+            const cls = barColor(pctSafe);
+            return `
+        <div class="hw-bar-wrap">
+            <div class="hw-bar-label">
+                <span><i class="${icon} me-1" style="width:14px;text-align:center;"></i>${label}</span>
+                <span>${subtitle}</span>
+            </div>
+            <div class="hw-bar">
+                <div class="hw-bar-fill ${cls}" style="width:${pctSafe}%"></div>
+            </div>
+        </div>`;
+        }
+
+        function fetchStats() {
+            fetch('/api/system/stats')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return;
+
+                    // Actualizar Alerta de CPU
+                    const cpuPct = data.cpu?.percent ?? 0;
+                    if (cpuPct > 75) {
+                        cpuAlert?.classList.remove('d-none');
+                    } else {
+                        cpuAlert?.classList.add('d-none');
+                    }
+
+                    // Renderizar Widget si está visible
+                    if (document.getElementById('statsWidget').style.display === 'block') {
+                        let html = '';
+                        html += barHtml('CPU', 'fas fa-microchip', cpuPct, `${cpuPct.toFixed(1)}%`);
+
+                        const ram = data.ram || {};
+                        html += barHtml('RAM', 'fas fa-memory', ram.percent, `${ram.used_gb ?? '?'} / ${ram.total_gb ?? '?'} GB`);
+
+                        const disk = data.disk || {};
+                        html += barHtml('Disco', 'fas fa-hdd', disk.percent, `${disk.used_gb ?? '?'} / ${disk.total_gb ?? '?'} GB`);
+
+                        if (data.gpu && data.gpu.device) {
+                            const gpu = data.gpu;
+                            const gpuName = gpu.name && gpu.name !== gpu.device ? gpu.name : 'GPU';
+                            if (gpu.load !== null) {
+                                html += barHtml(gpuName, 'fas fa-bolt', gpu.load, `${gpu.load}%`);
+                            }
+                            if (gpu.vram !== null) {
+                                html += barHtml('VRAM GPU', 'fas fa-layer-group', gpu.vram, `${gpu.vram}%`);
+                            }
                         }
-                    })
-                    .catch(error => {
-                        console.error('Error al verificar el uso de CPU:', error);
-                        cpuAlert.classList.add('d-none');
-                    });
+                        document.getElementById('statsBody').innerHTML = html;
+                    }
+                })
+                .catch(() => { });
+        }
+
+        function toggleStats() {
+            const w = document.getElementById('statsWidget');
+            const b = document.getElementById('btnStats');
+            const isOpen = w.style.display === 'block';
+
+            if (!isOpen) {
+                w.style.display = 'block';
+                b.classList.add('active');
+                localStorage.setItem('statsWidgetOpen', 'true');
+                fetchStats();
+                if (!_statsInterval) _statsInterval = setInterval(fetchStats, 2000);
+            } else {
+                closeStats();
+            }
+        }
+
+        function closeStats() {
+            const w = document.getElementById('statsWidget');
+            const b = document.getElementById('btnStats');
+            w.style.display = 'none';
+            b.classList.remove('active');
+            localStorage.setItem('statsWidgetOpen', 'false');
+            // No detenemos el interval del todo porque lo usamos para la alerta de CPU globalmente
+            // pero podemos ralentizarlo si queremos, o dejarlo así.
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            // Restaurar estado desde localStorage
+            const wasOpen = localStorage.getItem('statsWidgetOpen') === 'true';
+            if (wasOpen) {
+                document.getElementById('statsWidget').style.display = 'block';
+                document.getElementById('btnStats').classList.add('active');
             }
 
-            // Verificar cada 5 segundos
-            setInterval(checkCpuUsage, 5000);
-            // Verificar al cargar la pagina
-            checkCpuUsage();
+            // Iniciar polling (necesario para la alerta de CPU también)
+            fetchStats();
+            _statsInterval = setInterval(fetchStats, 2000);
         });
     </script>
     {% block extra_js %}{% endblock %}
 </body>
+
 </html>
