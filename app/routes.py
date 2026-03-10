@@ -24,14 +24,64 @@ main_bp = Blueprint('main', __name__)
 
 @main_bp.route('/api/system/stats')
 def system_stats():
-    """Devuelve estadisticas del sistema como el uso de la CPU."""
+    """Devuelve estadisticas del sistema: CPU, RAM, disco y GPU (si esta configurada)."""
     try:
-        # Obtener el uso de la CPU. interval=0.5 para una medicion no bloqueante.
+        import psutil
+
         cpu_percent = psutil.cpu_percent(interval=0.5)
-        return jsonify({'success': True, 'cpu_percent': cpu_percent})
+
+        mem = psutil.virtual_memory()
+        ram_percent  = mem.percent
+        ram_used_gb  = round(mem.used  / (1024**3), 1)
+        ram_total_gb = round(mem.total / (1024**3), 1)
+
+        disk = psutil.disk_usage('/')
+        disk_percent  = disk.percent
+        disk_used_gb  = round(disk.used  / (1024**3), 1)
+        disk_total_gb = round(disk.total / (1024**3), 1)
+
+        result = {
+            'success': True,
+            'cpu':  {'percent': cpu_percent},
+            'ram':  {'percent': ram_percent,  'used_gb': ram_used_gb,  'total_gb': ram_total_gb},
+            'disk': {'percent': disk_percent, 'used_gb': disk_used_gb, 'total_gb': disk_total_gb},
+            'gpu': None
+        }
+
+        # GPU solo si esta configurada como motor activo
+        try:
+            from .config_manager import config_manager
+            video_cfg = config_manager.get_video_config()
+            if video_cfg.get('hardware_accel') == 'gpu':
+                import glob
+                gpu_device = video_cfg.get('gpu_device', '')
+                gpu_info = {'device': gpu_device, 'load': None, 'vram': None, 'name': gpu_device}
+                for drm_path in glob.glob('/sys/class/drm/card*/'):
+                    busy_path      = os.path.join(drm_path, 'device', 'gpu_busy_percent')
+                    mem_used_path  = os.path.join(drm_path, 'device', 'mem_info_vram_used')
+                    mem_total_path = os.path.join(drm_path, 'device', 'mem_info_vram_total')
+                    name_path      = os.path.join(drm_path, 'device', 'product_name')
+                    if os.path.exists(busy_path):
+                        with open(busy_path) as f:
+                            gpu_info['load'] = int(f.read().strip())
+                    if os.path.exists(mem_used_path) and os.path.exists(mem_total_path):
+                        with open(mem_used_path) as f: vram_used  = int(f.read().strip())
+                        with open(mem_total_path) as f: vram_total = int(f.read().strip())
+                        if vram_total > 0:
+                            gpu_info['vram'] = round((vram_used / vram_total) * 100, 1)
+                    if os.path.exists(name_path):
+                        with open(name_path) as f: gpu_info['name'] = f.read().strip()
+                    if gpu_info['load'] is not None:
+                        break
+                result['gpu'] = gpu_info
+        except Exception as e:
+            logger.warning(f"No se pudo obtener estadisticas de GPU: {e}")
+
+        return jsonify(result)
     except Exception as e:
         logger.error(f"Error al obtener estadisticas del sistema: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 # Variable global para almacenar el hash de la lista M3U
 m3u_hash = None

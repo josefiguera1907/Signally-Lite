@@ -37,7 +37,7 @@
                 <i class="fas fa-chart-line fa-3x mb-3 text-info"></i>
                 <h5 class="card-title">Estadísticas</h5>
                 <p class="card-text">Visualiza el rendimiento de tus contenidos.</p>
-                <a href="#" class="btn btn-outline-info">Ver</a>
+                <button type="button" class="btn btn-outline-info" onclick="toggleStats()">Ver</button>
             </div>
         </div>
     </div>
@@ -51,19 +51,196 @@
             </div>
             <div class="card-body">
                 <p>No hay actividad reciente para mostrar.</p>
-                <!-- Aquí podrías incluir una tabla o lista de actividades recientes -->
             </div>
         </div>
     </div>
 </div>
+
+<!-- ── Widget flotante de estadísticas ─────────────────────────────── -->
+<div id="statsWidget" style="
+    display: none;
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 300px;
+    z-index: 1055;
+    box-shadow: 0 8px 32px rgba(0,0,0,.22);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--bs-body-bg, #fff);
+    border: 1px solid rgba(0,0,0,.12);
+    animation: slideUpIn .22s ease;
+">
+    <!-- Cabecera -->
+    <div style="
+        background: linear-gradient(135deg,#0d6efd,#0dcaf0);
+        padding: 10px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    ">
+        <span style="color:#fff; font-weight:600; font-size:.9rem;">
+            <i class="fas fa-tachometer-alt me-2"></i>Uso del Hardware
+        </span>
+        <button onclick="closeStats()" style="
+            background:none; border:none; color:#fff; font-size:1.1rem;
+            cursor:pointer; line-height:1; padding:0 2px;" title="Cerrar">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+
+    <!-- Cuerpo -->
+    <div style="padding: 14px 16px;" id="statsBody">
+        <div class="d-flex justify-content-center py-2">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="ms-2 small text-muted">Cargando...</span>
+        </div>
+    </div>
+</div>
+
+<style>
+    @keyframes slideUpIn {
+        from {
+            opacity: 0;
+            transform: translateY(18px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .hw-bar-wrap {
+        margin-bottom: 12px;
+    }
+
+    .hw-bar-label {
+        display: flex;
+        justify-content: space-between;
+        font-size: .78rem;
+        margin-bottom: 3px;
+        font-weight: 500;
+    }
+
+    .hw-bar {
+        height: 8px;
+        border-radius: 99px;
+        background: #e9ecef;
+        overflow: hidden;
+    }
+
+    .hw-bar-fill {
+        height: 100%;
+        border-radius: 99px;
+        transition: width .4s ease;
+    }
+
+    .hw-bar-fill.low {
+        background: linear-gradient(90deg, #198754, #20c997);
+    }
+
+    .hw-bar-fill.mid {
+        background: linear-gradient(90deg, #fd7e14, #ffc107);
+    }
+
+    .hw-bar-fill.high {
+        background: linear-gradient(90deg, #dc3545, #e35d6a);
+    }
+</style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// Código JavaScript específico para la página de inicio
-$(document).ready(function() {
-    console.log('Página de inicio cargada');
-    // Aquí puedes agregar más lógica de JavaScript si es necesario
-});
+    let _statsInterval = null;
+
+    function barColor(pct) {
+        if (pct < 60) return 'low';
+        if (pct < 85) return 'mid';
+        return 'high';
+    }
+
+    function barHtml(label, icon, pct, subtitle) {
+        const pctSafe = Math.min(100, Math.max(0, pct ?? 0));
+        const cls = barColor(pctSafe);
+        return `
+    <div class="hw-bar-wrap">
+        <div class="hw-bar-label">
+            <span><i class="${icon} me-1" style="width:14px;text-align:center;"></i>${label}</span>
+            <span>${subtitle}</span>
+        </div>
+        <div class="hw-bar">
+            <div class="hw-bar-fill ${cls}" style="width:${pctSafe}%"></div>
+        </div>
+    </div>`;
+    }
+
+    function renderStats(data) {
+        let html = '';
+
+        // CPU
+        const cpu = data.cpu?.percent ?? 0;
+        html += barHtml('CPU', 'fas fa-microchip', cpu, `${cpu.toFixed(1)}%`);
+
+        // RAM
+        const ram = data.ram || {};
+        html += barHtml('RAM', 'fas fa-memory', ram.percent,
+            `${ram.used_gb ?? '?'} / ${ram.total_gb ?? '?'} GB`);
+
+        // Disco
+        const disk = data.disk || {};
+        html += barHtml('Almacenamiento', 'fas fa-hdd', disk.percent,
+            `${disk.used_gb ?? '?'} / ${disk.total_gb ?? '?'} GB`);
+
+        // GPU (solo si viene en la respuesta)
+        if (data.gpu && data.gpu.device) {
+            const gpu = data.gpu;
+            const gpuName = gpu.name && gpu.name !== gpu.device ? gpu.name : 'GPU';
+            if (gpu.load !== null && gpu.load !== undefined) {
+                html += barHtml(gpuName, 'fas fa-bolt', gpu.load, `${gpu.load}%`);
+            } else {
+                html += `<div class="hw-bar-wrap">
+                <div class="hw-bar-label">
+                    <span><i class="fas fa-bolt me-1"></i>${gpuName}</span>
+                    <span class="text-muted small">Sin datos sysfs</span>
+                </div>
+                <div class="hw-bar"><div class="hw-bar-fill low" style="width:0%"></div></div>
+            </div>`;
+            }
+            if (gpu.vram !== null && gpu.vram !== undefined) {
+                html += barHtml('VRAM GPU', 'fas fa-layer-group', gpu.vram, `${gpu.vram}%`);
+            }
+        }
+
+        document.getElementById('statsBody').innerHTML = html;
+    }
+
+    function fetchStats() {
+        fetch('/api/system/stats')
+            .then(r => r.json())
+            .then(data => { if (data.success) renderStats(data); })
+            .catch(() => { });
+    }
+
+    function toggleStats() {
+        const w = document.getElementById('statsWidget');
+        if (w.style.display === 'none' || !w.style.display) {
+            w.style.display = 'block';
+            fetchStats();
+            _statsInterval = setInterval(fetchStats, 2000);
+        } else {
+            closeStats();
+        }
+    }
+
+    function closeStats() {
+        document.getElementById('statsWidget').style.display = 'none';
+        clearInterval(_statsInterval);
+        _statsInterval = null;
+    }
+
+    $(document).ready(function () {
+        console.log('Página de inicio cargada');
+    });
 </script>
 {% endblock %}
