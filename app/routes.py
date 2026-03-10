@@ -24,9 +24,9 @@ main_bp = Blueprint('main', __name__)
 
 @main_bp.route('/api/system/stats')
 def system_stats():
-    """Devuelve estadisticas del sistema: CPU, RAM, disco y GPU (si esta configurada)."""
+    """Devuelve estadísticas del sistema: CPU, RAM, disco y GPU (si está configurada)."""
     try:
-        import psutil
+        # psutil ya se importa al inicio del archivo
 
         cpu_percent = psutil.cpu_percent(interval=0.5)
 
@@ -2592,33 +2592,34 @@ def check_m3u_route():
     Solo actúa cuando el path coincide exactamente con la ruta M3U configurada.
     """
     from .config_manager import config_manager
+    from flask import request as flask_request
 
     # Solo para peticiones GET
-    if flask_request.method != 'GET':
+    if flask_request.method != "GET":
         return
 
     # Obtener el path sin el leading slash
-    path = flask_request.path.lstrip('/')
+    path = flask_request.path.lstrip("/")
 
-    # Si el path está vacío, ignorar
-    if not path:
+    # 1. Ignorar si el path está vacío o es una ruta reservada del sistema
+    reserved = ["", "api", "conf", "static", "gestion_canales", "gestion_contenido", "player", "canales", "multimedia"]
+    base_path = path.rstrip("/")
+    if base_path in reserved:
         return
 
-    # Si ya termina en .m3u, ignorar (será manejado por las rutas con extensión)
-    if path.endswith('.m3u'):
+    # 2. Ignorar si ya termina en .m3u o tiene sub-clases (contiene /)
+    if path.endswith(".m3u") or ("/" in path and not path.endswith("/")):
         return
 
-    # Si contiene una '/' (es una ruta con sub-segmentos), ignorar
-    if '/' in path:
-        return
+    # 3. Verificar si coincide EXACTAMENTE con la ruta M3U configurada
+    try:
+        configured_path = config_manager.get_m3u_config()["url_path"]
+        configured_no_ext = configured_path.replace(".m3u", "") if configured_path.endswith(".m3u") else configured_path
 
-    # Verificar si coincide EXACTAMENTE con la ruta M3U configurada (sin extensión)
-    configured_path = config_manager.get_m3u_config()['url_path']
-    configured_without_ext = configured_path.replace('.m3u', '') if configured_path.endswith('.m3u') else configured_path
-
-    if path == configured_without_ext:
-        # Es la ruta M3U configurada sin extensión, servirla
-        return serve_m3u_playlist(path)
+        if base_path == configured_no_ext:
+            return serve_m3u_playlist(path)
+    except Exception:
+        pass
 
 @main_bp.route('/actualizar_m3u', methods=['POST'])
 def actualizar_m3u():
