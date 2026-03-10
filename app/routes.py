@@ -19,30 +19,27 @@ import psutil
 # Configurar el logger
 logger = logging.getLogger(__name__)
 
-def get_video_stream_params(bitrate=2500):
+def get_video_stream_params(bitrate=2500, force_cpu=False):
     """Retorna los parametros de codificacion segun la configuracion de GPU."""
     from .config_manager import config_manager
     video_cfg = config_manager.get_video_config()
-    use_gpu = video_cfg.get('hardware_accel') == 'gpu'
+    use_gpu = video_cfg.get('hardware_accel') == 'gpu' and not force_cpu
     gpu_device = video_cfg.get('gpu_device', '/dev/dri/renderD128')
     
     hw_args = []
     if use_gpu:
         hw_args = [
             '-hwaccel', 'vaapi', 
-            '-hwaccel_device', gpu_device, 
-            '-hwaccel_output_format', 'vaapi'
+            '-hwaccel_device', gpu_device
+            # Eliminamos -hwaccel_output_format vaapi por compatibilidad con Radeon/LXC
         ]
         video_args = [
             '-c:v', 'h264_vaapi',
-            '-preset', 'veryfast',
-            '-tune', 'zerolatency',
             '-b:v', f'{bitrate}k',
             '-maxrate', f'{bitrate}k',
             '-bufsize', f'{bitrate*2}k',
             '-g', '60'
         ]
-        # Nota: El filtro scale debe ser scale_vaapi si se usa hwaccel
     else:
         video_args = [
             '-c:v', 'libx264',
@@ -1303,7 +1300,7 @@ def transmitir_canal(canal_id):
                 # Buscamos el filtro de escala que ya fue agregado antes y lo cambiamos por el de vaapi
                 for idx, item in enumerate(ffmpeg_cmd):
                     if item == '-vf':
-                        ffmpeg_cmd[idx+1] = ffmpeg_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+                        ffmpeg_cmd[idx+1] = ffmpeg_cmd[idx+1].replace('yuv420p', 'nv12')
                 
                 ffmpeg_cmd.extend([
                     '-c:v', 'h264_vaapi',
@@ -1631,7 +1628,7 @@ def transmitir_canal(canal_id):
                 target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
                 for idx, item in enumerate(target_cmd):
                     if item == '-vf':
-                        target_cmd[idx+1] = target_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+                        target_cmd[idx+1] = target_cmd[idx+1].replace('yuv420p', 'nv12')
             
             # Agregar los parametros de codificacion
             if 'cmd' in locals(): cmd.extend(video_args)
@@ -1956,7 +1953,7 @@ def transmitir_canal(canal_id):
                 target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
                 for idx, item in enumerate(target_cmd):
                     if item == '-vf':
-                        target_cmd[idx+1] = target_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+                        target_cmd[idx+1] = target_cmd[idx+1].replace('yuv420p', 'nv12')
             
             # Agregar los parametros de codificacion
             if 'cmd' in locals(): cmd.extend(video_args)
@@ -2269,7 +2266,7 @@ def transmitir_canal(canal_id):
                 target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
                 for idx, item in enumerate(target_cmd):
                     if item == '-vf':
-                        target_cmd[idx+1] = target_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+                        target_cmd[idx+1] = target_cmd[idx+1].replace('yuv420p', 'nv12')
             
             # Agregar los parametros de codificacion
             if 'cmd' in locals(): cmd.extend(video_args)
