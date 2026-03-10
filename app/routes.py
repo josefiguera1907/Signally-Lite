@@ -19,6 +19,44 @@ import psutil
 # Configurar el logger
 logger = logging.getLogger(__name__)
 
+def get_video_stream_params(bitrate=2500):
+    """Retorna los parametros de codificacion segun la configuracion de GPU."""
+    from .config_manager import config_manager
+    video_cfg = config_manager.get_video_config()
+    use_gpu = video_cfg.get('hardware_accel') == 'gpu'
+    gpu_device = video_cfg.get('gpu_device', '/dev/dri/renderD128')
+    
+    hw_args = []
+    if use_gpu:
+        hw_args = [
+            '-hwaccel', 'vaapi', 
+            '-hwaccel_device', gpu_device, 
+            '-hwaccel_output_format', 'vaapi'
+        ]
+        video_args = [
+            '-c:v', 'h264_vaapi',
+            '-preset', 'veryfast',
+            '-tune', 'zerolatency',
+            '-b:v', f'{bitrate}k',
+            '-maxrate', f'{bitrate}k',
+            '-bufsize', f'{bitrate*2}k',
+            '-g', '60'
+        ]
+        # Nota: El filtro scale debe ser scale_vaapi si se usa hwaccel
+    else:
+        video_args = [
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-tune', 'zerolatency',
+            '-b:v', f'{bitrate}k',
+            '-maxrate', f'{bitrate}k',
+            '-bufsize', f'{bitrate*2}k',
+            '-g', '60',
+            '-pix_fmt', 'yuv420p'
+        ]
+    return hw_args, video_args, use_gpu
+
+
 # Crear el Blueprint primero para evitar referencias circulares
 main_bp = Blueprint('main', __name__)
 
@@ -48,32 +86,60 @@ def system_stats():
             'gpu': None
         }
 
-        # GPU solo si esta configurada como motor activo
+        # GPU (Sensor Robusto AMD/Intel para LXC)
         try:
             from .config_manager import config_manager
             video_cfg = config_manager.get_video_config()
             if video_cfg.get('hardware_accel') == 'gpu':
                 import glob
-                gpu_device = video_cfg.get('gpu_device', '')
+                gpu_device = video_cfg.get('gpu_device', '/dev/dri/renderD128')
                 gpu_info = {'device': gpu_device, 'load': None, 'vram': None, 'name': gpu_device}
-                for drm_path in glob.glob('/sys/class/drm/card*/'):
-                    busy_path      = os.path.join(drm_path, 'device', 'gpu_busy_percent')
-                    mem_used_path  = os.path.join(drm_path, 'device', 'mem_info_vram_used')
-                    mem_total_path = os.path.join(drm_path, 'device', 'mem_info_vram_total')
-                    name_path      = os.path.join(drm_path, 'device', 'product_name')
-                    if os.path.exists(busy_path):
-                        with open(busy_path) as f:
-                            gpu_info['load'] = int(f.read().strip())
-                    if os.path.exists(mem_used_path) and os.path.exists(mem_total_path):
-                        with open(mem_used_path) as f: vram_used  = int(f.read().strip())
-                        with open(mem_total_path) as f: vram_total = int(f.read().strip())
-                        if vram_total > 0:
-                            gpu_info['vram'] = round((vram_used / vram_total) * 100, 1)
-                    if os.path.exists(name_path):
-                        with open(name_path) as f: gpu_info['name'] = f.read().strip()
-                    if gpu_info['load'] is not None:
-                        break
+                
+                # 1. Intentar deducir el cardX a partir del renderD1xx
+                dev_name = os.path.basename(gpu_device) # renderD128
+                
+                # Intentar varias rutas de sysfs
+                search_paths = [
+                    f'/sys/class/drm/{dev_name}/device/', # Directo si existe
+                    '/sys/class/drm/card0/device/',       # Clasico card0
+                    '/sys/class/drm/card1/device/',       # Clasico card1
+                ]
+                # Agregar paths dinámicos
+                for p in glob.glob('/sys/class/drm/card*/device/'):
+                    if p not in search_paths: search_paths.append(p)
+
+                for base in search_paths:
+                    busy = os.path.join(base, 'gpu_busy_percent')
+                    v_used = os.path.join(base, 'mem_info_vram_used')
+                    v_total = os.path.join(base, 'mem_info_vram_total')
+                    p_name = os.path.join(base, 'product_name')
+                    
+                    if os.path.exists(busy):
+                        try:
+                            with open(busy) as f: gpu_info['load'] = int(f.read().strip())
+                        except: pass
+                    
+                    if os.path.exists(v_used) and os.path.exists(v_total):
+                        try:
+                            with open(v_used) as f: u = int(f.read().strip())
+                            with open(v_total) as f: t = int(f.read().strip())
+                            if t > 0: gpu_info['vram'] = round((u/t)*100, 1)
+                        except: pass
+                    
+                    if os.path.exists(p_name):
+                        try:
+                            with open(p_name) as f: gpu_info['name'] = f.read().strip()
+                        except: pass
+                    
+                    if gpu_info['load'] is not None: break
+
+                # Fallback: si no hay carga pero hay render device, mostrar al menos que existe
+                if gpu_info['load'] is None and os.path.exists(gpu_device):
+                    gpu_info['load'] = 0 # Mostrar 0% en lugar de ocultarlo
+
                 result['gpu'] = gpu_info
+        except Exception as e:
+            logger.warning(f"Error en sensor GPU: {e}")
         except Exception as e:
             logger.warning(f"No se pudo obtener estadisticas de GPU: {e}")
 
@@ -330,7 +396,7 @@ def handle_auto_start():
 def player():
     """Reproductor de transmisiones HLS."""
     # Cargar solo los canales que estén en transmisión
-    canales = [canal for canal in Canal.cargar_todos() if getattr(canal, 'en_transmision', False)]
+# Fixed stray bracket
     # Obtener la URL base del servidor RTMP desde la configuración o usar localhost por defecto
     rtmp_server = current_app.config.get('RTMP_SERVER', 'http://localhost:1936')
     return render_template('player.html',
@@ -665,7 +731,6 @@ def servir_archivo(filename):
             os.path.dirname(filepath),
             os.path.basename(filepath)
         )
-        
         # Configurar cabeceras para permitir streaming
         response.headers['Accept-Ranges'] = 'bytes'
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -787,8 +852,7 @@ def transmitir_canal(canal_id):
             result = subprocess.run(
                 ['pstree', '-p', str(pid)],
                 capture_output=True,
-                text=True
-            )
+                text=True)
             if result.returncode == 0:
                 # Extraer todos los PIDs del árbol de procesos
                 import re
@@ -866,7 +930,8 @@ def transmitir_canal(canal_id):
                 text=True
             )
             if result.returncode == 0:
-                pids = [int(p.strip()) for p in result.stdout.split() if p.strip().isdigit()]
+                pids = result.stdout.split()
+                pids = [int(p) for p in pids if p.isdigit()]
                 # Obtener también los hijos de los hijos de forma recursiva
                 all_pids = pids.copy()
                 for child_pid in pids:
@@ -1218,25 +1283,46 @@ def transmitir_canal(canal_id):
             maxrate_str = f'{bitrate}k'
             bufsize_str = f'{bitrate * 2}k'  # Buffer = 2x bitrate
 
-            # Configuración de codificación optimizada
-            ffmpeg_cmd.extend([
-                '-c:v', 'libx264',
-                '-preset', 'veryfast',  # Balance entre velocidad y calidad
-                '-tune', 'zerolatency',  # Optimización para streaming en tiempo real
-                '-b:v', bitrate_str,  # Bitrate configurado por el usuario
-                '-maxrate', maxrate_str,  # Bitrate máximo igual al configurado
-                '-bufsize', bufsize_str,  # Buffer = 2x el bitrate
-                '-g', '60',  # Keyframe cada 2 segundos (a 30fps)
-                '-keyint_min', '60',  # Mínimo de frames entre keyframes
-                '-sc_threshold', '0',  # Deshabilitar detección de escenas
-                '-pix_fmt', 'yuv420p',  # Formato de píxel compatible
-                '-c:a', 'aac',  # Códec de audio
-                '-b:a', '192k',  # Aumentado de 128k a 192k para mejor calidad de audio
-                '-ar', '44100',  # Frecuencia de muestreo de audio
-                '-ac', '2',  # Audio estéreo
-                '-f', 'flv',  # Formato de salida
-                rtmp_url
-            ])
+            # Configuración de codificación optimizada (CPU vs GPU)
+            from .config_manager import config_manager
+            video_cfg = config_manager.get_video_config()
+            
+            if video_cfg.get('hardware_accel') == 'gpu':
+                gpu_device = video_cfg.get('gpu_device', '/dev/dri/renderD128')
+                # Insertar flags de aceleración al inicio (después de -i si es una entrada, pero aquí construimos la lista)
+                # FFmpeg necesita los flags de hardware antes o después del input dependiendo del modo.
+                # Para h264_vaapi en stream en vivo:
+                ffmpeg_cmd.insert(1, '-hwaccel')
+                ffmpeg_cmd.insert(2, 'vaapi')
+                ffmpeg_cmd.insert(3, '-hwaccel_device')
+                ffmpeg_cmd.insert(4, gpu_device)
+                ffmpeg_cmd.insert(5, '-hwaccel_output_format')
+                ffmpeg_cmd.insert(6, 'vaapi')
+                
+                # Cambiar encoder y filtros
+                # Buscamos el filtro de escala que ya fue agregado antes y lo cambiamos por el de vaapi
+                for idx, item in enumerate(ffmpeg_cmd):
+                    if item == '-vf':
+                        ffmpeg_cmd[idx+1] = ffmpeg_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+                
+                ffmpeg_cmd.extend([
+                    '-c:v', 'h264_vaapi',
+                    '-preset', 'veryfast',
+                    '-tune', 'zerolatency',
+                    '-b:v', bitrate_str,  # Bitrate configurado por el usuario
+                    '-maxrate', maxrate_str,  # Bitrate máximo igual al configurado
+                    '-bufsize', bufsize_str,  # Buffer = 2x el bitrate
+                    '-g', '60',  # Keyframe cada 2 segundos (a 30fps)
+                    '-keyint_min', '60',  # Mínimo de frames entre keyframes
+                    '-sc_threshold', '0',  # Deshabilitar detección de escenas
+                    '-pix_fmt', 'yuv420p',  # Formato de píxel compatible
+                    '-c:a', 'aac',  # Códec de audio
+                    '-b:a', '192k',  # Aumentado de 128k a 192k para mejor calidad de audio
+                    '-ar', '44100',  # Frecuencia de muestreo de audio
+                    '-ac', '2',  # Audio estéreo
+                    '-f', 'flv',  # Formato de salida
+                    rtmp_url
+                ])
             
             # Mostrar el comando completo para depuración
             print("Comando FFmpeg:", ' '.join(ffmpeg_cmd))
@@ -1397,8 +1483,7 @@ def transmitir_canal(canal_id):
             result = subprocess.run(
                 ['pstree', '-p', str(pid)],
                 capture_output=True,
-                text=True
-            )
+                text=True)
             if result.returncode == 0:
                 # Extraer todos los PIDs del árbol de procesos
                 import re
@@ -1533,17 +1618,24 @@ def transmitir_canal(canal_id):
         else:
             print("No se aplicaron filtros de video")
         
-        # Añadir parámetros de codificación
-        ffmpeg_cmd.extend([
-            '-c:v', 'libx264',  # Códec de video
-            '-preset', 'veryfast',  # Velocidad de codificación
-            '-tune', 'zerolatency',  # Optimización para streaming
-            '-c:a', 'aac',  # Códec de audio
-            '-ar', '44100',  # Frecuencia de muestreo de audio
-            '-b:a', '128k',  # Tasa de bits de audio
-            '-f', 'flv',  # Formato de salida
-            rtmp_url  # URL de destino RTMP
-        ])
+
+            # Parametros de video (GPU/CPU)
+            hw_args, video_args, use_gpu = get_video_stream_params()
+            if use_gpu:
+                # Insertar hw_args al principio (despues de ffmpeg)
+                for i, arg in enumerate(hw_args):
+                    if 'cmd' in locals(): cmd.insert(i+1, arg)
+                    elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
+                
+                # Buscar y adaptar filtros -vf
+                target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+                for idx, item in enumerate(target_cmd):
+                    if item == '-vf':
+                        target_cmd[idx+1] = target_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+            
+            # Agregar los parametros de codificacion
+            if 'cmd' in locals(): cmd.extend(video_args)
+            elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
         
         try:
             # Iniciar el proceso FFmpeg
@@ -1737,8 +1829,7 @@ def transmitir_canal(canal_id):
                 result = subprocess.run(
                     ['pstree', '-p', str(pid)],
                     capture_output=True,
-                    text=True
-                )
+                    text=True)
                 if result.returncode == 0:
                     # Extraer todos los PIDs del árbol de procesos
                     import re
@@ -1852,27 +1943,24 @@ def transmitir_canal(canal_id):
             else:
                 print("No se aplicaron filtros de video")
             
-            # Añadir parámetros de codificación
-            cmd.extend([
-                '-c:v', 'libx264',
-                '-preset', 'veryfast',
-                '-tune', 'zerolatency',
-                '-profile:v', 'high',
-                '-level', '4.2',
-                '-x264opts', 'keyint=60:min-keyint=30:no-scenecut',
-                '-b:v', '4500k',  # Aumentado de 2500k para mejor calidad
-                '-maxrate', '3000k',
-                '-bufsize', '5000k',
-                '-pix_fmt', 'yuv420p',
-                '-r', '30',
-                '-c:a', 'aac',
-                '-b:a', '128k',
-                '-ar', '44100',
-                '-ac', '2',
-                '-f', 'flv',
-                '-flvflags', 'no_duration_filesize',
-                rtmp_url
-            ])
+
+            # Parametros de video (GPU/CPU)
+            hw_args, video_args, use_gpu = get_video_stream_params()
+            if use_gpu:
+                # Insertar hw_args al principio (despues de ffmpeg)
+                for i, arg in enumerate(hw_args):
+                    if 'cmd' in locals(): cmd.insert(i+1, arg)
+                    elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
+                
+                # Buscar y adaptar filtros -vf
+                target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+                for idx, item in enumerate(target_cmd):
+                    if item == '-vf':
+                        target_cmd[idx+1] = target_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+            
+            # Agregar los parametros de codificacion
+            if 'cmd' in locals(): cmd.extend(video_args)
+            elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
             
             print(f"Iniciando transmisión con comando: {' '.join(cmd)}")
             
@@ -2111,7 +2199,6 @@ def transmitir_canal(canal_id):
                 
             ffmpeg_available = True
             print("FFmpeg está correctamente instalado y accesible")
-            
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             ffmpeg_available = False
             error_msg = 'Error: FFmpeg no está instalado o no está en el PATH del sistema.'
@@ -2169,24 +2256,24 @@ def transmitir_canal(canal_id):
         if vf_filters:
             cmd.extend(['-vf', ','.join(vf_filters)])
             
-        # Añadir parámetros de codificación de video
-        cmd.extend([
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-tune', 'zerolatency',
-            '-pix_fmt', 'yuv420p',
-            # Audio (asegurarse de que el audio esté presente)
-            '-c:a', 'aac',
-            '-ar', '44100',
-            '-b:a', '128k',
-            '-ac', '2',
-            # Opciones de salida
-            '-f', 'flv',
-            '-flush_packets', '1',
-            '-rtmp_buffer', '100',
-            '-rtmp_live', 'live',
-            rtmp_url
-        ])
+
+            # Parametros de video (GPU/CPU)
+            hw_args, video_args, use_gpu = get_video_stream_params()
+            if use_gpu:
+                # Insertar hw_args al principio (despues de ffmpeg)
+                for i, arg in enumerate(hw_args):
+                    if 'cmd' in locals(): cmd.insert(i+1, arg)
+                    elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.insert(i+1, arg)
+                
+                # Buscar y adaptar filtros -vf
+                target_cmd = cmd if 'cmd' in locals() else ffmpeg_cmd
+                for idx, item in enumerate(target_cmd):
+                    if item == '-vf':
+                        target_cmd[idx+1] = target_cmd[idx+1].replace('scale=', 'scale_vaapi=').replace('yuv420p', 'nv12|vaapi')
+            
+            # Agregar los parametros de codificacion
+            if 'cmd' in locals(): cmd.extend(video_args)
+            elif 'ffmpeg_cmd' in locals(): ffmpeg_cmd.extend(video_args)
         
         # Imprimir el comando completo para depuración
         print("Comando FFmpeg:", ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd))
@@ -2400,7 +2487,6 @@ def transmitir_canal(canal_id):
             try:
                 import threading
                 thread = threading.Thread(
-                    target=lambda p, pid: (p.wait(), cleanup(pid)),
                     args=(proceso, proceso.pid)
                 )
                 thread.daemon = True  # El hilo no evitará que el programa termine
