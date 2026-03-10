@@ -14,12 +14,24 @@ from pathlib import Path
 from .models import Canal
 from .config_manager import config_manager
 from .video_processor import video_processor, get_video_duration
+import psutil
 
 # Configurar el logger
 logger = logging.getLogger(__name__)
 
 # Crear el Blueprint primero para evitar referencias circulares
 main_bp = Blueprint('main', __name__)
+
+@main_bp.route('/api/system/stats')
+def system_stats():
+    """Devuelve estadisticas del sistema como el uso de la CPU."""
+    try:
+        # Obtener el uso de la CPU. interval=0.5 para una medicion no bloqueante.
+        cpu_percent = psutil.cpu_percent(interval=0.5)
+        return jsonify({'success': True, 'cpu_percent': cpu_percent})
+    except Exception as e:
+        logger.error(f"Error al obtener estadisticas del sistema: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Variable global para almacenar el hash de la lista M3U
 m3u_hash = None
@@ -438,6 +450,8 @@ def guardar_canal():
     rotacion = request.form.get('rotacion', 0)
     repeticion = request.form.get('repeticion', 'bucle')
     contenidos = request.form.getlist('contenidos')
+    calidad = request.form.get('calidad', '360p')
+    bitrate = request.form.get('bitrate', 2500)
     
     print(f"Valor de repetición recibido: {repeticion}")
     print(f"Todos los datos del formulario: {request.form}")
@@ -465,6 +479,8 @@ def guardar_canal():
         canal.rotacion = int(rotacion)
         canal.repeticion = repeticion
         canal.contenidos = contenidos
+        canal.calidad = calidad
+        canal.bitrate = int(bitrate)
         canal.fecha_actualizacion = datetime.now().isoformat()
     else:
         canal = Canal(
@@ -472,7 +488,9 @@ def guardar_canal():
             tipo_contenido=tipo_contenido,
             rotacion=int(rotacion),
             repeticion=repeticion,
-            contenidos=contenidos
+            contenidos=contenidos,
+            calidad=calidad,
+            bitrate=int(bitrate)
         )
     
     # Guardar el canal
@@ -659,9 +677,11 @@ def eliminar_archivo():
                 
                 # Eliminar tareas relacionadas si existen
                 with video_processor.lock:
-                    # Buscar tareas que coincidan con el nombre del archivo
                     tasks_to_remove = []
-                    for task_id, task in video_processor.active_tasks.items():
+                    # Buscar en tareas activas y en cola
+                    all_tasks = list(video_processor.active_tasks.items()) + list(video_processor.queued_tasks.items())
+                    
+                    for task_id, task in all_tasks:
                         if task.get('filename') == filename:
                             tasks_to_remove.append(task_id)
                     
@@ -1018,33 +1038,54 @@ def transmitir_canal(canal_id):
             
             # Crear archivo de lista de reproducción
             playlist_file = os.path.join(playlist_dir, f'playlist_{canal.id}.txt')
+            archivos_playlist = []  # Guardar los archivos para repetir el último
+
             with open(playlist_file, 'w', encoding='utf-8') as f:
                 for contenido in canal.contenidos:
                     # Obtener la ruta del archivo, prefiriendo la versión transcodificada si existe
                     filename = os.path.basename(contenido)
                     ruta_contenido, es_transcodificado = get_media_path(filename, prefer_transcoded=True)
-                    
+
                     if ruta_contenido and os.path.isfile(ruta_contenido):
                         # Si es un archivo de video y no está transcodificado, verificar si hay una tarea de transcodificación en curso
                         if not es_transcodificado and filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')):
                             # Verificar si hay una tarea de transcodificación pendiente
                             esta_procesando = any(
-                                task_id in video_processor.active_tasks and 
+                                task_id in video_processor.active_tasks and
                                 video_processor.active_tasks[task_id].get('filename') == filename
                                 for task_id in video_processor.active_tasks
                             )
-                            
+
                             if esta_procesando:
                                 print(f"[INFO] El archivo {filename} está siendo transcodificado. Se usará temporalmente la versión original.")
-                        
+
                         # Asegurar que la ruta esté correctamente escapada
                         ruta_escapada = ruta_contenido.replace("'", "'\\''")
-                        duracion = 10  # Duración predeterminada en segundos (ajustar según necesidades)
+
+                        # Obtener la duración real del video
+                        try:
+                            duracion = get_video_duration(ruta_contenido)
+                            if duracion is None or duracion <= 0:
+                                duracion = 10  # Fallback si no se puede obtener la duración
+                                print(f"[WARNING] No se pudo obtener la duración de {filename}, usando 10 segundos por defecto")
+                            else:
+                                print(f"[INFO] Duración de {filename}: {duracion} segundos")
+                        except Exception as e:
+                            duracion = 10  # Fallback en caso de error
+                            print(f"[ERROR] Error al obtener duración de {filename}: {e}")
+
+                        # Guardar para poder repetir el último archivo
+                        archivos_playlist.append((ruta_escapada, duracion))
+
                         f.write(f"file '{ruta_escapada}'\n")
                         f.write(f"duration {duracion}\n")
-                
-                # Añadir una línea en blanco al final del archivo
-                f.write("\n")
+
+                # IMPORTANTE: Para que -stream_loop funcione correctamente con el formato concat
+                # que incluye 'duration', es necesario repetir el último archivo al final.
+                # Referencia: https://ffmpeg.org/ffmpeg-formats.html#concat-1
+                if archivos_playlist:
+                    ultimo_archivo, _ = archivos_playlist[-1]
+                    f.write(f"file '{ultimo_archivo}'\n")
             
             # Verificar si hay archivos en la lista de reproducción
             if os.path.getsize(playlist_file) == 0:
@@ -1091,7 +1132,24 @@ def transmitir_canal(canal_id):
             
             # Configuración de video
             video_filters = []
-            
+
+            # Mapeo de calidad a resolución
+            resolution_map = {
+                '360p': '640:360',
+                '480p': '854:480',
+                '720p': '1280:720',
+                '1080p': '1920:1080',
+                '1440p': '2560:1440',
+                '2160p': '3840:2160'
+            }
+
+            # Obtener calidad configurada del canal (por defecto 360p)
+            calidad = getattr(canal, 'calidad', '360p')
+            resolution = resolution_map.get(calidad, '640:360')
+
+            # Agregar filtro de escalado según la calidad
+            video_filters.append(f'scale={resolution}')
+
             # Aplicar rotación según la configuración del canal
             if hasattr(canal, 'rotacion') and canal.rotacion is not None:
                 if canal.rotacion == 90:
@@ -1100,19 +1158,24 @@ def transmitir_canal(canal_id):
                     video_filters.append('transpose=2,transpose=2')  # 180°
                 elif canal.rotacion == 270:
                     video_filters.append('transpose=2')  # 90° antihorario
+
+            # Añadir filtros de video (siempre habrá al menos el filtro de scale)
+            ffmpeg_cmd.extend(['-vf', ','.join(video_filters)])
             
-            # Añadir filtros de video si existen
-            if video_filters:
-                ffmpeg_cmd.extend(['-vf', ','.join(video_filters)])
-            
+            # Obtener bitrate configurado del canal (por defecto 2500 kbps)
+            bitrate = getattr(canal, 'bitrate', 2500)
+            bitrate_str = f'{bitrate}k'
+            maxrate_str = f'{bitrate}k'
+            bufsize_str = f'{bitrate * 2}k'  # Buffer = 2x bitrate
+
             # Configuración de codificación optimizada
             ffmpeg_cmd.extend([
                 '-c:v', 'libx264',
                 '-preset', 'veryfast',  # Balance entre velocidad y calidad
                 '-tune', 'zerolatency',  # Optimización para streaming en tiempo real
-                '-b:v', '5000k',  # Aumentado de 3000k a 5000k para mejor calidad
-                '-maxrate', '5000k',  # Aumentado el bitrate máximo
-                '-bufsize', '10000k',  # Aumentado el buffer (2x el bitrate)
+                '-b:v', bitrate_str,  # Bitrate configurado por el usuario
+                '-maxrate', maxrate_str,  # Bitrate máximo igual al configurado
+                '-bufsize', bufsize_str,  # Buffer = 2x el bitrate
                 '-g', '60',  # Keyframe cada 2 segundos (a 30fps)
                 '-keyint_min', '60',  # Mínimo de frames entre keyframes
                 '-sc_threshold', '0',  # Deshabilitar detección de escenas
@@ -2406,20 +2469,106 @@ def check_m3u_update():
             'needs_update': True  # Por defecto, asumir que necesita actualización en caso de error
         })
 
-@main_bp.route('/dynamic_channels.m3u')
-def get_m3u_playlist():
-    """Sirve la lista M3U actual"""
+def serve_m3u_playlist(m3u_path=None):
+    """Función auxiliar para servir la lista M3U"""
+    from .config_manager import config_manager
+    from flask import abort
+
+    # Obtener la ruta configurada
+    configured_path = config_manager.get_m3u_config()['url_path']
+
+    if m3u_path:
+        # Normalizar: si no termina en .m3u, agregarlo para comparación
+        if not m3u_path.endswith('.m3u'):
+            requested_path = f"{m3u_path}.m3u"
+        else:
+            requested_path = m3u_path
+
+        # Verificar si coincide con alguna ruta permitida
+        configured_without_ext = configured_path.replace('.m3u', '') if configured_path.endswith('.m3u') else configured_path
+
+        if requested_path == configured_path:
+            # Coincide exactamente con la configurada
+            filename = configured_path
+        elif m3u_path == configured_without_ext:
+            # Coincide con la configurada sin extensión
+            filename = configured_path if configured_path.endswith('.m3u') else f"{configured_path}.m3u"
+        elif requested_path == 'dynamic_channels.m3u' or m3u_path == 'dynamic_channels':
+            # Retrocompatibilidad
+            filename = 'dynamic_channels.m3u'
+        else:
+            # No coincide con ninguna ruta válida
+            abort(404)
+    else:
+        # Ruta por defecto
+        filename = configured_path if configured_path else 'dynamic_channels.m3u'
+
+    # Asegurar que filename termine en .m3u
+    if not filename.endswith('.m3u'):
+        filename = f"{filename}.m3u"
+
+    # Generar contenido M3U
     m3u_content = generate_m3u()
+
     return Response(
         m3u_content,
         mimetype='audio/x-mpegurl',
         headers={
-            'Content-Disposition': 'attachment; filename=dynamic_channels.m3u',
+            'Content-Disposition': f'attachment; filename={filename}',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0'
         }
     )
+
+# Ruta específica para dynamic_channels.m3u (retrocompatibilidad)
+@main_bp.route('/dynamic_channels.m3u')
+def get_m3u_playlist():
+    """Sirve dynamic_channels.m3u (retrocompatibilidad y default)"""
+    return serve_m3u_playlist('dynamic_channels.m3u')
+
+# Ruta dinámica para archivos .m3u
+@main_bp.route('/<m3u_filename>.m3u')
+def get_m3u_playlist_with_ext(m3u_filename):
+    """Sirve archivos .m3u con extensión"""
+    return serve_m3u_playlist(f"{m3u_filename}.m3u")
+
+# Agregar manejo de rutas sin extensión usando before_request
+from flask import request as flask_request
+
+@main_bp.before_app_request
+def check_m3u_route():
+    """Intercepta peticiones para rutas M3U sin extensión.
+    Solo actúa cuando el path coincide exactamente con la ruta M3U configurada.
+    """
+    from .config_manager import config_manager
+
+    # Solo para peticiones GET
+    if flask_request.method != 'GET':
+        return
+
+    # Obtener el path sin el leading slash
+    path = flask_request.path.lstrip('/')
+
+    # Si el path está vacío, ignorar
+    if not path:
+        return
+
+    # Si ya termina en .m3u, ignorar (será manejado por las rutas con extensión)
+    if path.endswith('.m3u'):
+        return
+
+    # Si contiene una '/' (es una ruta con sub-segmentos), ignorar
+    if '/' in path:
+        return
+
+    # Verificar si coincide EXACTAMENTE con la ruta M3U configurada (sin extensión)
+    configured_path = config_manager.get_m3u_config()['url_path']
+    configured_without_ext = configured_path.replace('.m3u', '') if configured_path.endswith('.m3u') else configured_path
+
+    if path == configured_without_ext:
+        # Es la ruta M3U configurada sin extensión, servirla
+        return serve_m3u_playlist(path)
 
 @main_bp.route('/actualizar_m3u', methods=['POST'])
 def actualizar_m3u():

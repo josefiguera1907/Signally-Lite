@@ -15,7 +15,7 @@ class Canal:
         ('streaming', 'Streaming')
     ]
     
-    def __init__(self, nombre, tipo_contenido, rotacion=0, repeticion='bucle', contenidos=None, id=None, proceso_ffmpeg=None, en_transmision=False):
+    def __init__(self, nombre, tipo_contenido, rotacion=0, repeticion='bucle', contenidos=None, id=None, proceso_ffmpeg=None, en_transmision=False, calidad='360p', bitrate=2500):
         self.id = id if id is not None else self._generar_id()
         self.nombre = nombre
         self.tipo_contenido = tipo_contenido
@@ -24,6 +24,8 @@ class Canal:
         self.contenidos = contenidos if contenidos is not None else []
         self.proceso_ffmpeg = proceso_ffmpeg  # ID del proceso FFmpeg si está en ejecución
         self.en_transmision = en_transmision  # Estado de la transmisión
+        self.calidad = calidad  # Calidad del stream (360p, 480p, 720p, 1080p, 1440p, 2160p)
+        self.bitrate = int(bitrate)  # Bitrate del stream en kbps
         self.fecha_creacion = datetime.now().isoformat()
         self.fecha_actualizacion = self.fecha_creacion
         self._current_playlist_index = 0  # Índice del contenido actual en reproducción
@@ -48,6 +50,8 @@ class Canal:
             'contenidos': self.contenidos,
             'proceso_ffmpeg': self.proceso_ffmpeg,
             'en_transmision': self.en_transmision,
+            'calidad': self.calidad,
+            'bitrate': self.bitrate,
             'fecha_creacion': self.fecha_creacion,
             'fecha_actualizacion': self.fecha_actualizacion
         }
@@ -59,7 +63,9 @@ class Canal:
         en_transmision = data.get('en_transmision', False)
         proceso_ffmpeg = data.get('proceso_ffmpeg')
         contenidos = data.get('contenidos', [])
-        
+        calidad = data.get('calidad', '360p')
+        bitrate = data.get('bitrate', 2500)
+
         canal = cls(
             id=data['id'],
             nombre=data['nombre'],
@@ -68,15 +74,21 @@ class Canal:
             repeticion=data['repeticion'],
             en_transmision=en_transmision,
             contenidos=contenidos,
-            proceso_ffmpeg=proceso_ffmpeg
+            proceso_ffmpeg=proceso_ffmpeg,
+            calidad=calidad,
+            bitrate=bitrate
         )
-        
+
         # Asegurarse de que los atributos estén establecidos
         if not hasattr(canal, 'en_transmision'):
             canal.en_transmision = en_transmision
         if not hasattr(canal, 'proceso_ffmpeg'):
             canal.proceso_ffmpeg = proceso_ffmpeg
-            
+        if not hasattr(canal, 'calidad'):
+            canal.calidad = calidad
+        if not hasattr(canal, 'bitrate'):
+            canal.bitrate = bitrate
+
         canal.fecha_creacion = data.get('fecha_creacion', datetime.now().isoformat())
         canal.fecha_actualizacion = data.get('fecha_actualizacion', datetime.now().isoformat())
         return canal

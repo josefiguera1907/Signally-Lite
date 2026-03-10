@@ -75,41 +75,107 @@ def install_system_dependencies():
 def setup_python_environment():
     """Configura el entorno virtual de Python"""
     print("\n=== Configurando entorno virtual de Python ===")
-    
+
     # Crear entorno virtual si no existe
     venv_dir = "venv"
     if not os.path.exists(venv_dir):
         print(f"Creando entorno virtual en {venv_dir}")
         venv.create(venv_dir, with_pip=True)
-    
-    # Activar entorno virtual e instalar dependencias
-    if platform.system() == "Windows":
-        pip_path = os.path.join(venv_dir, "Scripts", "pip")
     else:
-        pip_path = os.path.join(venv_dir, "bin", "pip")
-    
-    print("Instalando dependencias de Python...")
-    run_command(f"{pip_path} install --upgrade pip")
-    run_command(f"{pip_path} install -r requirements.txt")
+        print(f"✓ Entorno virtual ya existe en {venv_dir}")
+
+    # Obtener ruta absoluta del pip del entorno virtual
+    if platform.system() == "Windows":
+        pip_path = os.path.abspath(os.path.join(venv_dir, "Scripts", "pip"))
+        python_path = os.path.abspath(os.path.join(venv_dir, "Scripts", "python"))
+    else:
+        pip_path = os.path.abspath(os.path.join(venv_dir, "bin", "pip"))
+        python_path = os.path.abspath(os.path.join(venv_dir, "bin", "python"))
+
+    # Verificar que requirements.txt existe
+    if not os.path.exists("requirements.txt"):
+        print("✗ Error: No se encontró el archivo requirements.txt")
+        return False
+
+    print("Actualizando pip en el entorno virtual...")
+    result = run_command([pip_path, 'install', '--upgrade', 'pip'])
+
+    if result is None:
+        print("✗ Error al actualizar pip")
+        return False
+
+    print("Instalando dependencias de Python desde requirements.txt...")
+    result = run_command([pip_path, 'install', '-r', 'requirements.txt'])
+
+    if result is None:
+        print("✗ Error al instalar dependencias")
+        return False
+
+    print("✓ Dependencias de Python instaladas correctamente")
+    return True
 
 def setup_directories():
     """Crea los directorios necesarios"""
     print("\n=== Creando estructura de directorios ===")
-    
-    directories = [
+
+    # Directorios del proyecto
+    project_directories = [
         "multimedia",
+        "multimedia/originales",
+        "multimedia/transcodificados",
+        "multimedia/temp",
+        "multimedia/playlists",
+        "multimedia/logs",
         "app/static/uploads",
         "app/logs",
+        "logs"
+    ]
+
+    # Directorios del sistema
+    system_directories = [
         "/var/www/html/stream/hls"  # Directorio para archivos HLS
     ]
-    
-    for directory in directories:
+
+    # Crear directorios del proyecto
+    for directory in project_directories:
         try:
             os.makedirs(directory, exist_ok=True)
-            print(f"Directorio creado: {directory}")
+            print(f"✓ Directorio creado: {directory}")
         except Exception as e:
-            print(f"Advertencia: No se pudo crear el directorio {directory}: {e}")
-            print("Es posible que necesites ejecutar con sudo para crear directorios del sistema")
+            print(f"✗ Advertencia: No se pudo crear el directorio {directory}: {e}")
+
+    # Crear directorios del sistema (requieren sudo)
+    for directory in system_directories:
+        try:
+            os.makedirs(directory, exist_ok=True)
+            print(f"✓ Directorio creado: {directory}")
+        except Exception as e:
+            print(f"✗ Advertencia: No se pudo crear el directorio {directory}: {e}")
+            print("  Es posible que necesites ejecutar con sudo para crear directorios del sistema")
+
+def setup_json_files():
+    """Inicializa los archivos JSON de configuración"""
+    print("\n=== Inicializando archivos de configuración ===")
+
+    import json
+
+    # Archivo de canales
+    canales_file = "canales.json"
+    if not os.path.exists(canales_file):
+        with open(canales_file, 'w') as f:
+            json.dump([], f, indent=2)
+        print(f"✓ Archivo creado: {canales_file}")
+    else:
+        print(f"✓ Archivo existente: {canales_file}")
+
+    # Archivo de API keys
+    api_keys_file = "api_keys.json"
+    if not os.path.exists(api_keys_file):
+        with open(api_keys_file, 'w') as f:
+            json.dump({}, f, indent=2)
+        print(f"✓ Archivo creado: {api_keys_file}")
+    else:
+        print(f"✓ Archivo existente: {api_keys_file}")
 
 def set_permissions():
     """Establece los permisos necesarios"""
@@ -213,13 +279,16 @@ def main():
     
     # Configurar entorno Python
     setup_python_environment()
-    
+
     # Crear directorios necesarios
     setup_directories()
-    
+
+    # Inicializar archivos JSON
+    setup_json_files()
+
     # Establecer permisos
     set_permissions()
-    
+
     # Instalar FileBrowser
     install_filebrowser()
     

@@ -118,6 +118,11 @@
 
     <!-- Contenido principal -->
     <main class="container">
+        <div id="cpu-warning-alert" class="alert alert-warning d-none" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>Alto consumo de recursos detectado.</strong> Se recomienda esperar a que todo el contenido se haya procesado para un rendimiento óptimo.
+        </div>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -142,6 +147,32 @@
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
     <!-- Bootstrap JS y dependencias -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const cpuAlert = document.getElementById('cpu-warning-alert');
+
+            function checkCpuUsage() {
+                fetch('/api/system/stats')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.cpu_percent > 75) {
+                            cpuAlert.classList.remove('d-none');
+                        } else {
+                            cpuAlert.classList.add('d-none');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error al verificar el uso de CPU:', error);
+                        cpuAlert.classList.add('d-none');
+                    });
+            }
+
+            // Verificar cada 5 segundos
+            setInterval(checkCpuUsage, 5000);
+            // Verificar al cargar la pagina
+            checkCpuUsage();
+        });
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

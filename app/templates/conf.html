@@ -8,28 +8,211 @@
         <div class="col-12">
             <h1>Configuración</h1>
             <p class="lead">Ajustes de la aplicación</p>
-            
+
             <div class="card mt-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Opciones de Configuración</h5>
+                <!-- ── Cabecera con pestañas ── -->
+                <div class="card-header p-0">
+                    <ul class="nav nav-tabs card-header-tabs" id="configTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active px-4 py-3" id="tab-opciones" data-bs-toggle="tab"
+                                    data-bs-target="#panel-opciones" type="button" role="tab">
+                                <i class="fas fa-cog me-2"></i>Opciones de Configuración
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link px-4 py-3" id="tab-video" data-bs-toggle="tab"
+                                    data-bs-target="#panel-video" type="button" role="tab"
+                                    onclick="loadVideoConfig()">
+                                <i class="fas fa-microchip me-2"></i>Ajustes de Video
+                            </button>
+                        </li>
+                    </ul>
                 </div>
-                <div class="card-body">
-                    <form id="configForm">
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" id="autoStart" name="autoStart" 
-                                   {% if auto_start %}checked{% endif %}>
-                            <label class="form-check-label" for="autoStart">
-                                Autoarranque
-                                <i class="fas fa-question-circle text-muted ms-2" 
-                                   data-bs-toggle="tooltip" 
-                                   data-bs-placement="right" 
-                                   title="Habilita el autoarranque para ejecutar el entorno web de Signally de forma automática después del arranque de tu sistema.">
-                                </i>
-                            </label>
+
+                <div class="tab-content">
+                    <!-- ══════════════════════════════════════════
+                         PESTAÑA 1: Opciones de Configuración
+                    ══════════════════════════════════════════ -->
+                    <div class="tab-pane fade show active p-4" id="panel-opciones" role="tabpanel">
+
+                        <!-- Autoarranque -->
+                        <form id="configForm">
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="autoStart" name="autoStart"
+                                       {% if auto_start %}checked{% endif %}>
+                                <label class="form-check-label" for="autoStart">
+                                    Autoarranque
+                                    <i class="fas fa-question-circle text-muted ms-2"
+                                       data-bs-toggle="tooltip" data-bs-placement="right"
+                                       title="Habilita el autoarranque para ejecutar el entorno web de Signally de forma automática después del arranque de tu sistema.">
+                                    </i>
+                                </label>
+                            </div>
+                        </form>
+                        <div id="statusMessage" class="mt-2"></div>
+
+                        <hr class="my-4">
+
+                        <!-- URL M3U -->
+                        <h6 class="mb-3"><i class="fas fa-list"></i> Configuración de URL M3U</h6>
+                        <form id="m3uConfigForm">
+                            <div class="mb-3">
+                                <label for="m3uUrlPath" class="form-label">
+                                    Ruta del archivo M3U
+                                    <i class="fas fa-question-circle text-muted ms-2"
+                                       data-bs-toggle="tooltip" data-bs-placement="right"
+                                       title="Nombre del archivo M3U que se generará. Por defecto: dynamic_channels.m3u">
+                                    </i>
+                                </label>
+                                <div class="input-group mb-2" style="flex-wrap: nowrap;">
+                                    <span class="input-group-text"><i class="fas fa-file"></i></span>
+                                    <input type="text" class="form-control" id="m3uUrlPath"
+                                           placeholder="dynamic_channels.m3u" value="" style="flex: 1;">
+                                    <button type="button" class="btn btn-primary" onclick="saveM3UConfig()"
+                                            style="flex-shrink: 0; white-space: nowrap;">
+                                        <i class="fas fa-save"></i> Guardar
+                                    </button>
+                                </div>
+                                <small class="form-text text-muted">
+                                    Ejemplos: channels.m3u, playlist.m3u, streams.m3u, videos, canales<br>
+                                    <strong>Nota:</strong> Puedes usar con o sin extensión .m3u
+                                </small>
+                            </div>
+                            <div class="alert alert-info mb-0">
+                                <strong>URL de acceso:</strong><br>
+                                <code id="m3uCurrentUrl" class="d-block mt-2">Cargando...</code>
+                            </div>
+                        </form>
+                        <div id="m3uStatusMessage" class="mt-2"></div>
+
+                        <hr class="my-4">
+
+                        <!-- API Keys -->
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0"><i class="fas fa-key"></i> API Keys</h6>
+                            <button class="btn btn-sm btn-primary" id="generateKeyBtn" onclick="generateNewAPIKey()">
+                                <i class="fas fa-plus"></i> Generar nueva API Key
+                            </button>
                         </div>
-                    </form>
-                    <div id="statusMessage" class="mt-2"></div>
+                        <p class="text-muted small">Usa estas API Keys para autenticar solicitudes desde aplicaciones móviles o scripts externos.</p>
+                        <div id="apiKeysContainer">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Cargando...</span>
+                            </div>
+                            <span class="ms-2">Cargando API Keys...</span>
+                        </div>
+                        <div id="apiKeyMessage" class="mt-3"></div>
+                    </div>
+
+                    <!-- ══════════════════════════════════════════
+                         PESTAÑA 2: Ajustes de Video
+                    ══════════════════════════════════════════ -->
+                    <div class="tab-pane fade p-4" id="panel-video" role="tabpanel">
+
+                        <h6 class="mb-1"><i class="fas fa-film me-2"></i>Motor de Procesamiento de Video</h6>
+                        <p class="text-muted small mb-4">
+                            Elige si la transcodificación y transmisión de video se realizan usando la CPU del servidor
+                            o la GPU (aceleración por hardware). La GPU es significativamente más rápida y libera la CPU.
+                        </p>
+
+                        <!-- Selector CPU / GPU -->
+                        <div class="row g-3 mb-4" id="accelSelector">
+                            <!-- CPU -->
+                            <div class="col-md-6">
+                                <label class="d-block cursor-pointer" for="accel_cpu">
+                                    <div class="card border-2 h-100 accel-card" id="card_cpu" style="cursor:pointer;">
+                                        <div class="card-body d-flex align-items-center gap-3">
+                                            <input class="form-check-input flex-shrink-0 mt-0" type="radio"
+                                                   name="hardware_accel" id="accel_cpu" value="cpu"
+                                                   onchange="onAccelChange()">
+                                            <div>
+                                                <div class="fw-semibold"><i class="fas fa-server me-1 text-secondary"></i> CPU (Software)</div>
+                                                <small class="text-muted">Compatible con cualquier sistema. Sin requisitos adicionales.</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                            <!-- GPU -->
+                            <div class="col-md-6">
+                                <label class="d-block cursor-pointer" for="accel_gpu">
+                                    <div class="card border-2 h-100 accel-card" id="card_gpu" style="cursor:pointer;">
+                                        <div class="card-body d-flex align-items-center gap-3">
+                                            <input class="form-check-input flex-shrink-0 mt-0" type="radio"
+                                                   name="hardware_accel" id="accel_gpu" value="gpu"
+                                                   onchange="onAccelChange()">
+                                            <div>
+                                                <div class="fw-semibold"><i class="fas fa-bolt me-1 text-warning"></i> GPU (Aceleración por Hardware)</div>
+                                                <small class="text-muted">Más rápido y eficiente. Requiere GPU compatible con VAAPI.</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Panel de selección de GPU (visible solo cuando GPU está seleccionado) -->
+                        <div id="gpuPanel" class="mb-4" style="display:none;">
+                            <h6 class="mb-3"><i class="fas fa-video me-2"></i>Seleccionar GPU</h6>
+                            <div id="gpuList">
+                                <div class="d-flex align-items-center gap-2 text-muted">
+                                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                                    Detectando dispositivos de video...
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Botón guardar -->
+                        <div class="d-flex align-items-center gap-3">
+                            <button class="btn btn-primary" onclick="saveVideoConfig()">
+                                <i class="fas fa-save me-1"></i> Guardar ajustes de video
+                            </button>
+                            <div id="videoStatusMsg"></div>
+                        </div>
+
+                        <!-- Info / advertencia VAAPI -->
+                        <div class="alert alert-info mt-4 mb-0 small">
+                            <i class="fas fa-info-circle me-1"></i>
+                            <strong>Nota:</strong> La aceleración GPU usa <strong>VAAPI</strong> (Video Acceleration API).
+                            Si la GPU seleccionada no soporta H.264 por hardware, el sistema usará CPU automáticamente como fallback.
+                            Para que funcione en un contenedor LXC de Proxmox, el dispositivo
+                            <code>/dev/dri/renderD*</code> debe estar pasado al contenedor.
+                        </div>
+
+                    </div><!-- /panel-video -->
+                </div><!-- /tab-content -->
+            </div><!-- /card -->
+        </div>
+    </div>
+</div>
+
+<!-- Modal nueva API Key -->
+<div class="modal fade" id="newAPIKeyModal" tabindex="-1" aria-labelledby="newAPIKeyLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title" id="newAPIKeyLabel">⚠️ Nueva API Key Generada</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-danger"><strong>⚠️ Importante:</strong> Guarda esta API Key en un lugar seguro. No podrás verla de nuevo una vez que cierres este diálogo.</p>
+                <div class="form-group mt-3">
+                    <label for="newAPIKeyValue">API Key:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace" id="newAPIKeyValue" readonly>
+                        <button class="btn btn-outline-secondary" type="button" onclick="copyAPIKey()">
+                            <i class="fas fa-copy"></i> Copiar
+                        </button>
+                    </div>
                 </div>
+                <div class="alert alert-info mt-3">
+                    <strong>Cómo usar:</strong><br>
+                    Incluye esta API Key en el header de tus solicitudes:<br><br>
+                    <code>X-API-Key: sk_xxxxxxxxxxxxxxxx</code>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Listo, ya lo guardé</button>
             </div>
         </div>
     </div>
@@ -37,61 +220,290 @@
 {% endblock %}
 
 {% block extra_js %}
+<style>
+.accel-card { transition: border-color .2s, box-shadow .2s; }
+.accel-card.selected { border-color: #0d6efd !important; box-shadow: 0 0 0 3px rgba(13,110,253,.15); }
+.gpu-option { cursor: pointer; transition: background .15s; }
+.gpu-option:hover { background: rgba(0,0,0,.04); }
+.gpu-option.selected-gpu { background: rgba(13,110,253,.07); }
+</style>
 <script>
-// Inicializar tooltips de Bootstrap
+// ── Inicialización ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-    // Inicializar tooltips
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl);
-    });
+    // Tooltips
+    [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+      .forEach(el => new bootstrap.Tooltip(el));
 
-    // Manejar cambios en el switch de autoarranque
+    // Autoarranque
     const autoStartCheckbox = document.getElementById('autoStart');
     const statusMessage = document.getElementById('statusMessage');
-
     autoStartCheckbox.addEventListener('change', function() {
         const isEnabled = this.checked;
-        
-        // Mostrar indicador de carga
-        statusMessage.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Cargando...</span></div> Guardando configuración...';
+        statusMessage.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Guardando...';
         statusMessage.className = 'text-primary mt-2';
-        
-        // Enviar solicitud al servidor
         fetch('/api/config/auto_start', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ enabled: isEnabled })
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
             if (data.success) {
-                statusMessage.innerHTML = '<i class="fas fa-check-circle"></i> Configuración guardada correctamente';
+                statusMessage.innerHTML = '<i class="fas fa-check-circle"></i> Configuración guardada';
                 statusMessage.className = 'text-success mt-2';
-            } else {
-                throw new Error(data.message || 'Error al guardar la configuración');
-            }
+            } else { throw new Error(data.message || 'Error'); }
         })
-        .catch(error => {
-            console.error('Error:', error);
-            statusMessage.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${error.message || 'Error al guardar la configuración'}`;
+        .catch(err => {
+            statusMessage.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${err.message}`;
             statusMessage.className = 'text-danger mt-2';
-            // Revertir el cambio en el checkbox
             autoStartCheckbox.checked = !isEnabled;
         })
-        .finally(() => {
-            // Ocultar el mensaje después de 3 segundos
-            setTimeout(() => {
-                statusMessage.style.opacity = '0';
-                setTimeout(() => {
-                    statusMessage.textContent = '';
-                    statusMessage.style.opacity = '1';
-                }, 500);
-            }, 3000);
-        });
+        .finally(() => setTimeout(() => { statusMessage.textContent = ''; statusMessage.style.opacity='1'; }, 3500));
     });
+
+    loadAPIKeys();
+    loadM3UConfig();
+
+    // Preview M3U URL en tiempo real
+    const urlPathInput = document.getElementById('m3uUrlPath');
+    if (urlPathInput) urlPathInput.addEventListener('input', updateM3UCurrentUrl);
 });
+
+// ── Ajustes de Video ──────────────────────────────────────────────────────────
+let _gpuData = [];
+let _videoConfigLoaded = false;
+
+function loadVideoConfig() {
+    if (_videoConfigLoaded) return;   // evitar recargas innecesarias
+    fetch('/api/config/video')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            _videoConfigLoaded = true;
+            _gpuData = data.gpus || [];
+
+            // Establecer radio activo
+            const accel = data.config.hardware_accel || 'cpu';
+            const radio = document.querySelector(`input[name="hardware_accel"][value="${accel}"]`);
+            if (radio) { radio.checked = true; }
+            updateAccelCards();
+
+            // Si es GPU, mostrar panel y preseleccionar device
+            if (accel === 'gpu') {
+                renderGpuList(data.config.gpu_device);
+                document.getElementById('gpuPanel').style.display = 'block';
+            }
+        })
+        .catch(err => console.error('Error cargando config video:', err));
+}
+
+function onAccelChange() {
+    updateAccelCards();
+    const isGpu = document.querySelector('input[name="hardware_accel"]:checked')?.value === 'gpu';
+    const panel = document.getElementById('gpuPanel');
+    panel.style.display = isGpu ? 'block' : 'none';
+    if (isGpu && _gpuData.length === 0) {
+        fetch('/api/config/video')
+            .then(r => r.json())
+            .then(data => { _gpuData = data.gpus || []; renderGpuList(); });
+    } else if (isGpu) {
+        renderGpuList();
+    }
+}
+
+function updateAccelCards() {
+    const selected = document.querySelector('input[name="hardware_accel"]:checked')?.value;
+    document.getElementById('card_cpu').classList.toggle('selected', selected === 'cpu');
+    document.getElementById('card_gpu').classList.toggle('selected', selected === 'gpu');
+}
+
+function renderGpuList(preselectedDevice) {
+    const container = document.getElementById('gpuList');
+    if (_gpuData.length === 0) {
+        container.innerHTML = '<p class="text-muted small"><i class="fas fa-exclamation-triangle me-1 text-warning"></i>No se encontraron dispositivos VAAPI en <code>/dev/dri/renderD*</code>. Verifica que el dispositivo esté pasado al contenedor LXC.</p>';
+        return;
+    }
+
+    let html = '<div class="list-group">';
+    _gpuData.forEach((gpu, idx) => {
+        const isPreselected = preselectedDevice ? gpu.device === preselectedDevice : idx === 0;
+        const supportBadge = gpu.h264_encode
+            ? '<span class="badge bg-success ms-2"><i class="fas fa-check me-1"></i>H.264 Encode</span>'
+            : gpu.supported
+                ? '<span class="badge bg-warning text-dark ms-2">VAAPI (sin H.264 encode)</span>'
+                : `<span class="badge bg-danger ms-2"><i class="fas fa-times me-1"></i>${gpu.error || 'No disponible'}</span>`;
+
+        html += `
+        <label class="list-group-item list-group-item-action gpu-option d-flex align-items-start gap-3 py-3 ${isPreselected ? 'selected-gpu' : ''}"
+               for="gpu_${idx}" onclick="selectGpuOption(this)">
+            <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="gpu_device"
+                   id="gpu_${idx}" value="${gpu.device}" ${isPreselected ? 'checked' : ''}>
+            <div class="flex-grow-1">
+                <div class="fw-semibold d-flex align-items-center flex-wrap gap-1">
+                    <i class="fas fa-microchip text-primary me-1"></i>${gpu.name}
+                    ${supportBadge}
+                </div>
+                ${gpu.driver ? `<small class="text-muted d-block mt-1">${gpu.driver}</small>` : ''}
+                <small class="text-muted font-monospace">${gpu.device}</small>
+            </div>
+        </label>`;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function selectGpuOption(label) {
+    document.querySelectorAll('.gpu-option').forEach(el => el.classList.remove('selected-gpu'));
+    label.classList.add('selected-gpu');
+}
+
+function saveVideoConfig() {
+    const accel = document.querySelector('input[name="hardware_accel"]:checked')?.value || 'cpu';
+    const gpuDeviceInput = document.querySelector('input[name="gpu_device"]:checked');
+    const gpuDevice = gpuDeviceInput ? gpuDeviceInput.value : null;
+
+    const msgDiv = document.getElementById('videoStatusMsg');
+    msgDiv.innerHTML = '<div class="spinner-border spinner-border-sm me-2" role="status"></div>Guardando...';
+
+    fetch('/api/config/video', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ hardware_accel: accel, gpu_device: gpuDevice })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            msgDiv.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i>Guardado correctamente</span>';
+        } else {
+            throw new Error(data.error || 'Error al guardar');
+        }
+    })
+    .catch(err => {
+        msgDiv.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>${err.message}</span>`;
+    })
+    .finally(() => setTimeout(() => { msgDiv.innerHTML = ''; }, 4000));
+}
+
+// ── API Keys ──────────────────────────────────────────────────────────────────
+function loadAPIKeys() {
+    fetch('/api/api-keys')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('apiKeysContainer');
+            if (!data.api_keys || data.api_keys.length === 0) {
+                container.innerHTML = '<p class="text-muted">No hay API Keys generadas aún.</p>';
+                return;
+            }
+            let html = '<div class="table-responsive"><table class="table table-hover"><thead><tr><th>Nombre</th><th>ID</th><th>Creada</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+            data.api_keys.forEach(key => {
+                const createdDate = new Date(key.creada_en).toLocaleDateString('es-ES');
+                const lastUsed = key.ultima_utilizacion ? new Date(key.ultima_utilizacion).toLocaleString('es-ES') : 'Nunca';
+                const statusBadge = key.activa ? '<span class="badge bg-success">Activa</span>' : '<span class="badge bg-secondary">Desactivada</span>';
+                html += `<tr><td>${key.nombre}</td><td><code class="font-monospace">${key.vista_previa}</code></td><td>${createdDate}</td><td>${lastUsed}</td><td>${statusBadge}</td>
+                    <td><div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-secondary" onclick="copyKeyPreview('${key.vista_previa}')" title="Copiar"><i class="fas fa-copy"></i></button>
+                        <button type="button" class="btn btn-outline-danger" onclick="deleteAPIKey('${key.id}')" title="Eliminar"><i class="fas fa-trash"></i></button>
+                    </div></td></tr>`;
+            });
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        })
+        .catch(() => { document.getElementById('apiKeysContainer').innerHTML = '<p class="text-danger">Error al cargar las API Keys</p>'; });
+}
+
+function generateNewAPIKey() {
+    document.getElementById('generateKeyBtn').disabled = true;
+    fetch('/api/api-keys/generar', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ nombre: `API Key - ${new Date().toLocaleString('es-ES')}` })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('newAPIKeyValue').value = data.api_key;
+            new bootstrap.Modal(document.getElementById('newAPIKeyModal')).show();
+            setTimeout(loadAPIKeys, 1000);
+        } else { alert('Error: ' + (data.error || 'Error desconocido')); }
+    })
+    .catch(() => alert('Error al generar la API Key'))
+    .finally(() => { document.getElementById('generateKeyBtn').disabled = false; });
+}
+
+function copyAPIKey() {
+    const input = document.getElementById('newAPIKeyValue');
+    input.select(); document.execCommand('copy');
+    const btn = event.target.closest('button');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-check"></i> ¡Copiado!';
+    btn.classList.add('btn-success');
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('btn-success'); }, 2000);
+}
+
+function copyKeyPreview(preview) {
+    const input = document.createElement('input');
+    input.value = preview; document.body.appendChild(input); input.select(); document.execCommand('copy'); document.body.removeChild(input);
+    const btn = event.target.closest('button');
+    const orig = btn.innerHTML; btn.innerHTML = '<i class="fas fa-check"></i>';
+    setTimeout(() => { btn.innerHTML = orig; }, 1500);
+}
+
+function deleteAPIKey(keyId) {
+    if (!confirm('¿Estás seguro de que deseas eliminar esta API Key? Esta acción no se puede deshacer.')) return;
+    fetch(`/api/api-keys/${keyId}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) { loadAPIKeys(); showAPIKeyMessage('✓ API Key eliminada correctamente', 'success'); }
+            else { alert('Error: ' + (data.error || 'Error desconocido')); }
+        })
+        .catch(() => alert('Error al eliminar la API Key'));
+}
+
+function showAPIKeyMessage(message, type) {
+    const d = document.getElementById('apiKeyMessage');
+    d.innerHTML = `<div class="alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show" role="alert">${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+    setTimeout(() => { d.innerHTML = ''; }, 4000);
+}
+
+// ── M3U Config ────────────────────────────────────────────────────────────────
+function loadM3UConfig() {
+    fetch('/api/config/m3u')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('m3uUrlPath').value = data.config.url_path || 'dynamic_channels.m3u';
+                updateM3UCurrentUrl();
+            }
+        });
+}
+
+function updateM3UCurrentUrl() {
+    const urlPath = document.getElementById('m3uUrlPath').value || 'dynamic_channels.m3u';
+    document.getElementById('m3uCurrentUrl').textContent = `http://${window.location.host}/${urlPath}`;
+}
+
+function saveM3UConfig() {
+    const urlPath = document.getElementById('m3uUrlPath').value.trim();
+    const messageDiv = document.getElementById('m3uStatusMessage');
+    if (!urlPath) {
+        messageDiv.innerHTML = '<div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> La ruta no puede estar vacía</div>';
+        return;
+    }
+    messageDiv.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Guardando...';
+    fetch('/api/config/m3u', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ url_path: urlPath, custom_base: null })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            messageDiv.innerHTML = `<div class="alert alert-success alert-dismissible fade show"><i class="fas fa-check-circle"></i> ${data.message}<br><strong>Nueva URL:</strong> <code>${data.example_url}</code><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+            updateM3UCurrentUrl();
+        } else { throw new Error(data.error || 'Error'); }
+    })
+    .catch(err => {
+        messageDiv.innerHTML = `<div class="alert alert-danger alert-dismissible fade show"><i class="fas fa-exclamation-circle"></i> ${err.message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+    })
+    .finally(() => setTimeout(() => { messageDiv.querySelectorAll('.alert').forEach(a => { a.style.opacity='0'; setTimeout(()=>a.remove(),500); }); }, 5000));
+}
 </script>
 {% endblock %}

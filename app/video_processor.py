@@ -3,7 +3,7 @@ import subprocess
 import logging
 import time
 from queue import Queue, Empty
-from threading import Thread, Lock
+from threading import Thread, RLock
 from datetime import datetime
 
 # Configuración de logging
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class VideoProcessor:
     _instance = None
-    _lock = Lock()
+    _lock = RLock()
     
     def __new__(cls):
         with cls._lock:
@@ -34,7 +34,7 @@ class VideoProcessor:
         self._stop_event = False
         self.workers = []
         self.worker_count = 0
-        self.lock = Lock()
+        self.lock = RLock()
         
         # Configuración por defecto de transcodificación
         self.default_config = {
@@ -48,10 +48,10 @@ class VideoProcessor:
         }
     
     def start_workers(self, num_workers=None):
-        """Inicia los workers para procesar tareas en segundo plano.
+        """Inicia los workers para procesar tareas en segundo plano. 
         
         Args:
-            num_workers: Número de workers a iniciar. Si es None, se usará el número de CPUs - 1.
+            num_workers: Número de workers a iniciar. Si es None, se calculará automáticamente.
         """
         with self.lock:
             if self.workers:
@@ -59,7 +59,10 @@ class VideoProcessor:
                 return
                 
             if num_workers is None:
-                num_workers = 1  # Procesar de uno en uno
+                # Calcular el número de workers: la mitad de los núcleos de CPU, pero al menos 1.
+                # Esto evita sobrecargar el sistema, ya que cada worker (ffmpeg) puede usar múltiples hilos.
+                cpu_cores = os.cpu_count() or 1
+                num_workers = max(1, cpu_cores // 2)
             
             self._stop_event = False
             self.workers = []
@@ -74,7 +77,7 @@ class VideoProcessor:
                 worker.start()
                 self.workers.append(worker)
             
-            logger.info(f"Iniciados {num_workers} workers de transcodificación")
+            logger.info(f"Iniciados {num_workers} workers de transcodificación basados en {cpu_cores} núcleos de CPU.")
     
     def _worker_loop(self):
         """Bucle principal del worker que procesa tareas de la cola."""
@@ -146,7 +149,7 @@ class VideoProcessor:
                     time.sleep(1)
     
     def submit_task(self, task_func, *args, **kwargs):
-        """Envía una tarea a la cola de procesamiento.
+        """Envía una tarea a la cola de procesamiento. 
         
         Args:
             task_func: Función a ejecutar
@@ -160,7 +163,7 @@ class VideoProcessor:
         return task_id
     
     def get_task_status(self, task_id):
-        """Obtiene el estado de una tarea.
+        """Obtiene el estado de una tarea. 
         
         Args:
             task_id: ID de la tarea
@@ -215,9 +218,61 @@ class VideoProcessor:
         """Obtiene el número de workers activos."""
         with self.lock:
             return len([w for w in self.workers if w.is_alive()])
+
+    def cancel_task(self, task_id):
+        """Cancela una tarea de transcodificación, ya sea activa o en cola."""
+        with self.lock:
+            # Caso 1: La tarea está activa, hay que detener el proceso y limpiar
+            if task_id in self.active_tasks:
+                task = self.active_tasks.pop(task_id)
+                
+                # Detener el proceso si se está ejecutando
+                process = task.get('process')
+                if process and process.poll() is None:
+                    try:
+                        process.kill()
+                        logger.info(f"Proceso de transcodificación activo para la tarea {task_id} ha sido detenido.")
+                    except Exception as e:
+                        logger.error(f"Error al detener el proceso para la tarea {task_id}: {e}")
+                
+                # Limpiar el archivo temporal .tmp
+                output_path = task.get('output_path')
+                if output_path:
+                    temp_output_path = output_path + ".tmp"
+                    if os.path.exists(temp_output_path):
+                        try:
+                            os.remove(temp_output_path)
+                            logger.info(f"Archivo temporal {temp_output_path} eliminado.")
+                        except OSError as e:
+                            logger.error(f"Error al eliminar el archivo temporal {temp_output_path}: {e}")
+
+                task['status'] = 'cancelled'
+                task['error'] = 'La tarea fue cancelada por el usuario.'
+                self.completed_tasks[task_id] = task
+                return True
+
+            # Caso 2: La tarea está en la cola, hay que eliminarla
+            if task_id in self.queued_tasks:
+                self.queued_tasks.pop(task_id)
+                new_queue_items = []
+                while not self.task_queue.empty():
+                    try:
+                        item = self.task_queue.get_nowait()
+                        if item[0] != task_id:
+                            new_queue_items.append(item)
+                    except Empty:
+                        break
+                for item in new_queue_items:
+                    self.task_queue.put(item)
+                
+                logger.info(f"Tarea en cola {task_id} ha sido eliminada.")
+                return True
+        
+        logger.warning(f"No se encontró la tarea {task_id} para cancelar.")
+        return False
     
     def submit_transcode_task(self, input_path, output_path=None, config=None):
-        """Envía una tarea de transcodificación a la cola.
+        """Envía una tarea de transcodificación a la cola. 
         
         Args:
             input_path: Ruta al archivo de entrada
@@ -269,72 +324,93 @@ class VideoProcessor:
             return None, error_msg
 
 def transcode_video(input_path, output_path, config=None, task_id=None):
-    """Transcodifica un video al formato óptimo para transmisión de forma atómica.
-    
-    Args:
-        input_path: Ruta al archivo de entrada
-        output_path: Ruta donde guardar el archivo de salida final
-        config: Configuración de transcodificación (opcional)
-        task_id: ID de la tarea para actualizar el progreso
-        
-    Returns:
-        dict: Resultado de la operación
+    """Transcodifica un video al formato optimo para transmision de forma atomica.
+
+    Usa aceleracion GPU (VAAPI) si esta configurada en config_manager,
+    con fallback automatico a CPU si la GPU no esta disponible.
     """
     processor = VideoProcessor()
     if config is None:
         config = processor.default_config
-    
+
     temp_output_path = output_path + ".tmp"
-    
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     if os.path.exists(temp_output_path):
         os.remove(temp_output_path)
 
     total_duration = get_video_duration(input_path)
-    
-    audio_params = [
-        '-c:a', config['audio_codec'],
-        '-b:a', config['audio_bitrate'],
-        '-ac', '2',
-        '-ar', '44100'
-    ]
-    
-    cmd = [
-        'ffmpeg',
-        '-y',
-        '-nostdin',  # Evitar que ffmpeg lea de stdin y se cuelgue
-        '-i', input_path,
-        '-c:v', config['video_codec'],
-        '-preset', config['preset'],
-        '-crf', str(config['crf']),
-        '-vf', 'scale=-2:720',
-        '-pix_fmt', config['pix_fmt'],
-        '-movflags', '+faststart',
-        *audio_params,
-        '-progress', '-',  # Reactivar el progreso para la UI
-        '-f', 'mp4',
-        temp_output_path
-    ]
-    
-    logger.info(f"Iniciando transcodificación: {' '.join(cmd)}")
-    
+
+    # Leer configuracion de aceleracion de hardware
     try:
+        from .config_manager import config_manager
+        video_cfg = config_manager.get_video_config()
+        use_gpu   = video_cfg.get('hardware_accel') == 'gpu'
+        gpu_device = video_cfg.get('gpu_device', '/dev/dri/renderD128')
+    except Exception:
+        use_gpu    = False
+        gpu_device = '/dev/dri/renderD128'
+
+    audio_params = ['-c:a', config['audio_codec'], '-b:a', config['audio_bitrate'], '-ac', '2', '-ar', '44100']
+
+    def build_cpu_cmd():
+        return [
+            'ffmpeg', '-y', '-nostdin',
+            '-i', input_path,
+            '-c:v', config['video_codec'],
+            '-preset', config['preset'],
+            '-crf', str(config['crf']),
+            '-pix_fmt', config['pix_fmt'],
+            '-movflags', '+faststart',
+            *audio_params,
+            '-progress', '-',
+            '-f', 'mp4',
+            temp_output_path
+        ]
+
+    def build_gpu_cmd():
+        return [
+            'ffmpeg', '-y', '-nostdin',
+            '-hwaccel', 'vaapi',
+            '-hwaccel_device', gpu_device,
+            '-hwaccel_output_format', 'vaapi',
+            '-i', input_path,
+            '-vf', 'scale_vaapi=w=iw:h=ih,format=nv12|vaapi',
+            '-c:v', 'h264_vaapi',
+            *audio_params,
+            '-movflags', '+faststart',
+            '-progress', '-',
+            '-f', 'mp4',
+            temp_output_path
+        ]
+
+    # Verificar disponibilidad del device GPU
+    if use_gpu and not os.path.exists(gpu_device):
+        logger.warning(f"[GPU] Dispositivo {gpu_device} no existe. Usando CPU como fallback.")
+        use_gpu = False
+
+    cmd = build_gpu_cmd() if use_gpu else build_cpu_cmd()
+    mode_label = f"GPU VAAPI ({gpu_device})" if use_gpu else "CPU (libx264)"
+    logger.info(f"Iniciando transcodificacion [{mode_label}]: {input_path}")
+
+    def _run_ffmpeg(cmd_to_run):
         process = subprocess.Popen(
-            cmd,
+            cmd_to_run,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
             bufsize=1,
             errors='replace'
         )
-        
+        if task_id:
+            with processor.lock:
+                if task_id in processor.active_tasks:
+                    processor.active_tasks[task_id]['process'] = process
         output_lines = []
         for line in process.stdout:
             line = line.strip()
             output_lines.append(line)
             if not line:
                 continue
-
             if total_duration > 0 and 'out_time_ms' in line:
                 try:
                     current_time_us = int(line.split('=')[1].strip())
@@ -346,38 +422,49 @@ def transcode_video(input_path, output_path, config=None, task_id=None):
                                     processor.active_tasks[task_id]['progress'] = progress
                 except (ValueError, IndexError):
                     pass
-
         process.wait()
-        
-        if process.returncode != 0:
+        return process.returncode, output_lines
+
+    try:
+        returncode, output_lines = _run_ffmpeg(cmd)
+
+        # Fallback a CPU si GPU fallo
+        if returncode != 0 and use_gpu:
+            logger.warning(f"[GPU] Fallo la transcodificacion GPU (codigo {returncode}). Reintentando con CPU...")
+            if os.path.exists(temp_output_path):
+                os.remove(temp_output_path)
+            returncode, output_lines = _run_ffmpeg(build_cpu_cmd())
+            mode_label = "CPU-fallback (libx264)"
+
+        if returncode != 0:
             full_output = "\n".join(output_lines)
-            error_msg = f"Error en la transcodificación (código {process.returncode}). Salida de FFmpeg:\n{full_output[-2000:]}"
+            error_msg = f"Error en la transcodificacion (codigo {returncode}).\nSalida FFmpeg:\n{full_output[-2000:]}"
             logger.error(error_msg)
             if os.path.exists(temp_output_path):
                 os.remove(temp_output_path)
-            return {'success': False, 'error': error_msg, 'returncode': process.returncode}
-        
+            return {'success': False, 'error': error_msg, 'returncode': returncode}
+
         if not os.path.exists(temp_output_path) or os.path.getsize(temp_output_path) == 0:
-            error_msg = "El archivo de salida temporal no se creó o está vacío."
+            error_msg = "El archivo de salida temporal no se creo o esta vacio."
             logger.error(error_msg)
             return {'success': False, 'error': error_msg, 'returncode': -1}
-        
+
         os.rename(temp_output_path, output_path)
-        
-        logger.info(f"Transcodificación completada: {output_path}")
+        logger.info(f"Transcodificacion completada [{mode_label}]: {output_path}")
         return {
             'success': True,
             'output_path': output_path,
             'size': os.path.getsize(output_path),
             'duration': get_video_duration(output_path)
         }
-        
+
     except Exception as e:
-        error_msg = f"Error inesperado en la transcodificación: {str(e)}"
+        error_msg = f"Error inesperado en la transcodificacion: {str(e)}"
         logger.error(error_msg, exc_info=True)
         if os.path.exists(temp_output_path):
             os.remove(temp_output_path)
         return {'success': False, 'error': error_msg, 'exception': str(e)}
+
 
 def get_video_duration(file_path):
     """Obtiene la duración de un video en segundos."""

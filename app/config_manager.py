@@ -15,21 +15,30 @@ class ConfigManager:
     
     def _load_config(self):
         """Carga la configuración desde el archivo JSON"""
-        if not os.path.exists(self._config_file):
-            self.config = {
-                'auto_start': False,
-                'configuracion_inicial': False
+        default_config = {
+            'auto_start': False,
+            'configuracion_inicial': False,
+            'm3u_url_path': 'dynamic_channels.m3u',  # Ruta por defecto
+            'video_config': {
+                'hardware_accel': 'cpu',       # 'cpu' o 'gpu'
+                'gpu_device': '/dev/dri/renderD128'  # Dispositivo VAAPI
             }
+        }
+
+        if not os.path.exists(self._config_file):
+            self.config = default_config.copy()
             self._save_config()
         else:
             try:
                 with open(self._config_file, 'r') as f:
                     self.config = json.load(f)
+                    # Asegurar que existen los nuevos campos
+                    for key, value in default_config.items():
+                        if key not in self.config:
+                            self.config[key] = value
+                    self._save_config()
             except (json.JSONDecodeError, IOError):
-                self.config = {
-                    'auto_start': False,
-                    'configuracion_inicial': False
-                }
+                self.config = default_config.copy()
     
     def _save_config(self):
         """Guarda la configuración en el archivo JSON"""
@@ -210,15 +219,65 @@ done
         """Establece el estado del autoarranque"""
         value = bool(value)
         success, message = self._setup_autostart(value)
-        
+
         if success:
             self.config['auto_start'] = value
             self._save_config()
             print(f"[SUCCESS] {message}")
         else:
             print(f"[ERROR] {message}")
-        
+
         return success, message
+
+    def get_m3u_config(self):
+        """Obtiene la configuración de URL M3U"""
+        return {
+            'url_path': self.config.get('m3u_url_path', 'dynamic_channels.m3u')
+        }
+
+    def set_m3u_config(self, url_path=None, custom_base=None):
+        """Establece la configuración de URL M3U"""
+        if url_path is not None:
+            # Limpiar el path: remover slashes iniciales y espacios
+            url_path = url_path.strip().lstrip('/')
+            if not url_path:
+                url_path = 'dynamic_channels.m3u'
+            self.config['m3u_url_path'] = url_path
+
+        self._save_config()
+        return True, "Configuración de M3U actualizada correctamente"
+
+    def build_m3u_url(self, request_host=None):
+        """Construye la URL completa del M3U según la configuración"""
+        url_path = self.config.get('m3u_url_path', 'dynamic_channels.m3u')
+
+        if request_host:
+            # Usar el host de la petición
+            return f"http://{request_host}/{url_path}"
+        else:
+            # Fallback a localhost
+            return f"http://localhost/{url_path}"
+
+    def get_video_config(self):
+        """Obtiene la configuración de aceleración de video."""
+        default = {'hardware_accel': 'cpu', 'gpu_device': '/dev/dri/renderD128'}
+        cfg = self.config.get('video_config', default)
+        # Asegurar que existan las claves necesarias
+        cfg.setdefault('hardware_accel', 'cpu')
+        cfg.setdefault('gpu_device', '/dev/dri/renderD128')
+        return cfg
+
+    def set_video_config(self, hardware_accel, gpu_device=None):
+        """Guarda la configuración de aceleración de video."""
+        if hardware_accel not in ('cpu', 'gpu'):
+            return False, "Valor inválido para hardware_accel (debe ser 'cpu' o 'gpu')"
+        cfg = self.get_video_config()
+        cfg['hardware_accel'] = hardware_accel
+        if gpu_device is not None:
+            cfg['gpu_device'] = gpu_device
+        self.config['video_config'] = cfg
+        self._save_config()
+        return True, "Configuración de video guardada correctamente"
 
 # Instancia global para ser importada
 config_manager = ConfigManager()

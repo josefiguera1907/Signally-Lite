@@ -144,11 +144,33 @@
                     <div class="col-md-6">
                         <div class="form-check form-switch mt-4 pt-2">
                             <input type="hidden" name="repeticion" value="{{ 'bucle' if (canal_editar and canal_editar.repeticion == 'bucle') or not canal_editar else 'una_vez' }}">
-                            <input class="form-check-input" type="checkbox" role="switch" 
+                            <input class="form-check-input" type="checkbox" role="switch"
                                    id="repeticion" onchange="document.getElementsByName('repeticion')[0].value = this.checked ? 'bucle' : 'una_vez'"
                                    {% if (canal_editar and canal_editar.repeticion == 'bucle') or not canal_editar %}checked{% endif %}>
                             <label class="form-check-label" for="repeticion">Repetir contenido en bucle</label>
                         </div>
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="calidad" class="form-label">Calidad del Stream</label>
+                        <select class="form-select" id="calidad" name="calidad">
+                            <option value="360p" {% if canal_editar and canal_editar.calidad == '360p' %}selected{% elif not canal_editar %}selected{% endif %}>360p (Baja)</option>
+                            <option value="480p" {% if canal_editar and canal_editar.calidad == '480p' %}selected{% endif %}>480p (Media)</option>
+                            <option value="720p" {% if canal_editar and canal_editar.calidad == '720p' %}selected{% endif %}>720p (Alta - HD)</option>
+                            <option value="1080p" {% if canal_editar and canal_editar.calidad == '1080p' %}selected{% endif %}>1080p (Full HD)</option>
+                            <option value="1440p" {% if canal_editar and canal_editar.calidad == '1440p' %}selected{% endif %}>1440p (2K)</option>
+                            <option value="2160p" {% if canal_editar and canal_editar.calidad == '2160p' %}selected{% endif %}>2160p (4K)</option>
+                        </select>
+                        <small class="form-text text-muted">Resolución de salida del stream</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="bitrate" class="form-label">Bitrate (kbps)</label>
+                        <input type="number" class="form-control" id="bitrate" name="bitrate"
+                               value="{{ canal_editar.bitrate if canal_editar and canal_editar.bitrate else '2500' }}"
+                               min="500" max="50000" step="100">
+                        <small class="form-text text-muted">Tasa de bits del video (500-50000 kbps)</small>
                     </div>
                 </div>
                 
