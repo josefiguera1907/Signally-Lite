@@ -396,7 +396,7 @@ def handle_auto_start():
 def player():
     """Reproductor de transmisiones HLS."""
     # Cargar solo los canales que estén en transmisión
-# Fixed stray bracket
+    canales = [c for c in Canal.cargar_todos() if getattr(c, 'en_transmision', False)]
     # Obtener la URL base del servidor RTMP desde la configuración o usar localhost por defecto
     rtmp_server = current_app.config.get('RTMP_SERVER', 'http://localhost:1936')
     return render_template('player.html',
