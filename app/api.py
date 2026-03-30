@@ -421,57 +421,190 @@ def configure_nginx():
 
 # ==================== CONFIGURACIÓN DE VIDEO / GPU ====================
 
+def _get_lspci_gpus():
+    """Usa lspci para obtener la lista de GPUs con nombre comercial completo.
+
+    Retorna un dict mapeando PCI address (ej: '0000:01:00.0') → dict con
+    'pci_name', 'vendor', 'pci_id'.
+    """
+    import subprocess, re
+    pci_gpus = {}
+    GPU_CLASSES = {'VGA compatible controller', '3D controller', 'Display controller',
+                   'Display adapter'}
+    try:
+        result = subprocess.run(
+            ['lspci', '-mm', '-D'],  # -mm = machine readable, -D = show domain
+            capture_output=True, text=True, timeout=8
+        )
+        if result.returncode != 0:
+            return pci_gpus
+
+        # Cada línea: SlotAddr "Class" "Vendor" "Device" "SVendor" "SDevice" "Rev"
+        # Ejemplo: 0000:01:00.0 "VGA compatible controller" "NVIDIA" "GeForce RTX 3060" ...
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = re.split(r'\s+"', line, maxsplit=1)
+            if len(parts) < 2:
+                continue
+            pci_addr = parts[0].strip()
+            rest = '"' + parts[1]
+            # Extraer campos entre comillas
+            fields = re.findall(r'"([^"]*)"', rest)
+            if len(fields) < 3:
+                continue
+            pci_class, vendor_name, device_name = fields[0], fields[1], fields[2]
+
+            # Filtrar solo GPUs
+            if not any(cls in pci_class for cls in GPU_CLASSES):
+                continue
+
+            # Determinar vendor normalizado
+            vendor_lower = vendor_name.lower()
+            if 'advanced micro' in vendor_lower or ' amd' in vendor_lower or vendor_lower.startswith('amd'):
+                vendor = 'AMD'
+            elif 'intel' in vendor_lower:
+                vendor = 'Intel'
+            elif 'nvidia' in vendor_lower:
+                vendor = 'NVIDIA'
+            else:
+                vendor = vendor_name.split()[0] if vendor_name else 'GPU'
+
+            pci_gpus[pci_addr] = {
+                'pci_name': f"{vendor_name} {device_name}".strip(),
+                'vendor': vendor,
+                'pci_id': pci_addr,
+            }
+    except FileNotFoundError:
+        pass  # lspci no disponible, se usa fallback
+    except Exception:
+        pass
+    return pci_gpus
+
+
+def _get_render_pci_addr(render_dev):
+    """Obtiene el PCI address del dispositivo renderD* leyendo sysfs.
+
+    Ejemplo: /dev/dri/renderD128 → '0000:01:00.0'
+    """
+    import os, re
+    try:
+        dev_num = re.search(r'renderD(\d+)', render_dev)
+        if not dev_num:
+            return None
+        # Formato sysfs: /sys/class/drm/renderD128/device -> ../../../../0000:01:00.0
+        sysfs_path = f"/sys/class/drm/renderD{dev_num.group(1)}/device"
+        if not os.path.exists(sysfs_path):
+            return None
+        link_target = os.readlink(sysfs_path)
+        # El último componente del symlink es el PCI address
+        pci_addr = os.path.basename(link_target)
+        # Normalizar: algunos sistemas omiten el dominio, agregar '0000:' si falta
+        if re.match(r'^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$', pci_addr):
+            return pci_addr
+        # Sin dominio (ej: '01:00.0') → agregar dominio 0000
+        if re.match(r'^[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$', pci_addr):
+            return f'0000:{pci_addr}'
+    except Exception:
+        pass
+    return None
+
+
 def detect_gpus():
-    """Detecta GPUs disponibles con soporte VAAPI en /dev/dri/renderD*.
-    Retorna lista de dicts con info descriptiva de cada dispositivo."""
+    """Detecta GPUs disponibles combinando lspci (nombre real) y vainfo (soporte VAAPI).
+
+    Para cada /dev/dri/renderD* encontrado:
+    1. Cruza el nodo DRM con el bus PCI via sysfs para obtener el PCI address.
+    2. Busca ese PCI address en la salida de lspci para el nombre comercial completo.
+    3. Consulta vainfo para verificar soporte VAAPI y codificación H.264.
+
+    Retorna lista de dicts con: device, name, pci_name, vendor, pci_id, driver,
+    supported, h264_encode, error.
+    """
     import subprocess, re, glob
     gpus = []
     render_devices = sorted(glob.glob('/dev/dri/renderD*'))
     if not render_devices:
         return gpus
 
+    # Obtener info PCI de todas las GPUs del sistema (una sola llamada a lspci)
+    pci_gpus = _get_lspci_gpus()
+
     for device in render_devices:
+        dev_num_match = re.search(r'renderD(\d+)', device)
+        dev_label = f"renderD{dev_num_match.group(1)}" if dev_num_match else device
+
         info = {
             'device': device,
-            'name': device,
+            'name': dev_label,          # Fallback si no se detecta nada más
+            'pci_name': None,           # Nombre completo de lspci
+            'pci_id': None,             # PCI address (ej: 0000:01:00.0)
+            'vendor': 'GPU',
             'driver': '',
             'supported': False,
             'h264_encode': False,
             'error': None
         }
+
+        # ── Cruzar con lspci ────────────────────────────────────────────────
+        pci_addr = _get_render_pci_addr(device)
+        if pci_addr and pci_addr in pci_gpus:
+            pci_info = pci_gpus[pci_addr]
+            info['pci_name'] = pci_info['pci_name']
+            info['pci_id']   = pci_info['pci_id']
+            info['vendor']   = pci_info['vendor']
+            info['name']     = f"{pci_info['pci_name']} ({dev_label})"
+        elif pci_gpus:
+            # Si solo hay una GPU en el sistema y un único renderD*, asumir que es esa
+            if len(render_devices) == 1 and len(pci_gpus) == 1:
+                pci_addr_key, pci_info = next(iter(pci_gpus.items()))
+                info['pci_name'] = pci_info['pci_name']
+                info['pci_id']   = pci_info['pci_id']
+                info['vendor']   = pci_info['vendor']
+                info['name']     = f"{pci_info['pci_name']} ({dev_label})"
+
+        # ── Consultar vainfo ─────────────────────────────────────────────────
         try:
             result = subprocess.run(
                 ['vainfo', '--display', 'drm', '--device', device],
                 capture_output=True, text=True, timeout=8
             )
             output = result.stdout + result.stderr
+
             driver_match = re.search(r'Driver version:\s*(.*)', output)
             if driver_match:
-                driver_str = driver_match.group(1).strip()
-                info['driver'] = driver_str
-                vendor = 'GPU'
-                if any(k in driver_str.lower() for k in ('radeon', 'amd', 'verde', 'navi', 'polaris')):
-                    vendor = 'AMD'
-                elif 'intel' in driver_str.lower():
-                    vendor = 'Intel'
-                elif 'nvidia' in driver_str.lower():
-                    vendor = 'NVIDIA'
-                chip_match = re.search(r'for\s+([A-Z0-9]+(?:\s+[A-Z0-9]+)*)', driver_str, re.IGNORECASE)
-                chip_name = chip_match.group(1).strip() if chip_match else ''
-                dev_num = re.search(r'renderD(\d+)', device)
-                dev_label = f"renderD{dev_num.group(1)}" if dev_num else device
-                info['name'] = f"{vendor} {chip_name} ({dev_label})".strip()
+                info['driver'] = driver_match.group(1).strip()
+
+                # Si lspci no encontró el nombre, usar el driver de vainfo como fallback
+                if not info['pci_name']:
+                    driver_str = info['driver']
+                    vendor = 'GPU'
+                    if any(k in driver_str.lower() for k in ('radeon', 'amd', 'verde', 'navi', 'polaris')):
+                        vendor = 'AMD'
+                    elif 'intel' in driver_str.lower():
+                        vendor = 'Intel'
+                    elif 'nvidia' in driver_str.lower():
+                        vendor = 'NVIDIA'
+                    chip_match = re.search(r'for\s+([A-Z0-9]+(?:\s+[A-Z0-9]+)*)',
+                                           driver_str, re.IGNORECASE)
+                    chip_name = chip_match.group(1).strip() if chip_match else ''
+                    info['vendor'] = vendor
+                    info['name']   = f"{vendor} {chip_name} ({dev_label})".strip()
+
             if 'VAEntrypointEncSlice' in output and 'H264' in output:
                 info['h264_encode'] = True
                 info['supported'] = True
             elif result.returncode == 0:
                 info['supported'] = True
+
         except FileNotFoundError:
             info['error'] = 'vainfo no instalado'
         except subprocess.TimeoutExpired:
             info['error'] = 'Tiempo de espera agotado'
         except Exception as e:
             info['error'] = str(e)
+
         gpus.append(info)
     return gpus
 
