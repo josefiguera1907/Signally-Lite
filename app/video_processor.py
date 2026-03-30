@@ -11,6 +11,33 @@ logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ── Verificar dependencias del sistema al importar ────────────────────────────
+def _check_system_deps():
+    """Comprueba que ffmpeg y ffprobe estén disponibles en el PATH."""
+    missing = []
+    for bin_name in ('ffmpeg', 'ffprobe'):
+        result = subprocess.run(['which', bin_name],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            missing.append(bin_name)
+    if missing:
+        logger.error(
+            "=" * 60 + "\n"
+            "DEPENDENCIAS FALTANTES: %s\n"
+            "La transcodificación de video NO funcionará hasta instalarlas.\n"
+            "Solución en Debian/Ubuntu/LXC:\n"
+            "  apt update && apt install -y ffmpeg\n"
+            "O ejecuta el script de instalación del proyecto:\n"
+            "  bash install_deps.sh\n"
+            + "=" * 60,
+            ", ".join(missing)
+        )
+    else:
+        logger.info("✓ ffmpeg y ffprobe detectados correctamente.")
+
+_check_system_deps()
+
+
 class VideoProcessor:
     _instance = None
     _lock = RLock()
