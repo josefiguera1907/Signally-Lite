@@ -24,70 +24,110 @@
             transform: translateY(-1px);
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .btn-edit {
-            background-color: #e7f1ff;
-            color: #0d6efd;
+        .btn-edit  { background-color:#e7f1ff; color:#0d6efd; }
+        .btn-edit:hover  { background-color:#d0e2ff; border-color:#9ec5fe; }
+        .btn-delete { background-color:#f8d7da; color:#dc3545; }
+        .btn-delete:hover { background-color:#f1aeb5; border-color:#ea868f; }
+        .btn-transmit { background-color:#d1e7dd; color:#198754; }
+        .btn-transmit:hover { background-color:#a3cfbb; border-color:#75b798; }
+        .table-actions { white-space:nowrap; width:1%; padding:8px 12px !important; }
+
+        body { padding-top: 56px; }
+        .navbar-brand { font-weight: bold; }
+        .footer { background-color:#f8f9fa; padding:20px 0; margin-top:40px; }
+        .card { display:flex; flex-direction:column; height:100%; }
+        .card-body { flex:1; display:flex; flex-direction:column; position:relative; padding-bottom:3.5rem; }
+        .card-body .btn { position:absolute; bottom:1.25rem; left:50%; transform:translateX(-50%); white-space:nowrap; margin-top:1rem; }
+
+        /* ── Botón stats nav ── */
+        #statsNavBtn {
+            background: transparent;
+            border: 1px solid rgba(255,255,255,.25);
+            color: #fff;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: .85rem;
+            transition: background .2s, border-color .2s;
+            cursor: pointer;
         }
-        .btn-edit:hover {
-            background-color: #d0e2ff;
-            border-color: #9ec5fe;
+        #statsNavBtn:hover,
+        #statsNavBtn.active { background: rgba(255,255,255,.15); border-color: rgba(255,255,255,.5); }
+
+        /* ── Widget flotante ── */
+        #sysStatsWidget {
+            display: none;
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            z-index: 9999;
+            width: 280px;
+            background: rgba(18, 20, 28, 0.93);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 14px;
+            box-shadow: 0 8px 32px rgba(0,0,0,.45);
+            color: #e8eaf0;
+            font-size: .82rem;
+            user-select: none;
         }
-        .btn-delete {
-            background-color: #f8d7da;
-            color: #dc3545;
+        #sysStatsWidget.visible { display: block; animation: fadeInWidget .2s ease; }
+        @keyframes fadeInWidget {
+            from { opacity:0; transform:translateY(-8px) scale(.97); }
+            to   { opacity:1; transform:translateY(0)  scale(1); }
         }
-        .btn-delete:hover {
-            background-color: #f1aeb5;
-            border-color: #ea868f;
-        }
-        .btn-transmit {
-            background-color: #d1e7dd;
-            color: #198754;
-        }
-        .btn-transmit:hover {
-            background-color: #a3cfbb;
-            border-color: #75b798;
-        }
-        .table-actions {
-            white-space: nowrap;
-            width: 1%;
-            padding: 8px 12px !important;
-        }
-    </style>
-    <!-- Estilos personalizados -->
-    <style>
-        body {
-            padding-top: 56px;
-        }
-        .navbar-brand {
-            font-weight: bold;
-        }
-        .footer {
-            background-color: #f8f9fa;
-            padding: 20px 0;
-            margin-top: 40px;
-        }
-        .card {
+        #statsWidgetHeader {
             display: flex;
-            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px 8px;
+            cursor: grab;
+            border-bottom: 1px solid rgba(255,255,255,.08);
+        }
+        #statsWidgetHeader:active { cursor: grabbing; }
+        #statsWidgetHeader span { font-weight: 600; font-size: .88rem; letter-spacing:.02em; }
+        #statsWidgetClose {
+            background: none; border: none; color: rgba(255,255,255,.45);
+            font-size: .9rem; cursor: pointer; padding: 0 2px; transition: color .15s;
+        }
+        #statsWidgetClose:hover { color: #fff; }
+        #statsWidgetBody { padding: 12px 14px 14px; }
+
+        .stat-row { margin-bottom: 11px; }
+        .stat-row:last-child { margin-bottom: 0; }
+        .stat-label {
+            display: flex; justify-content: space-between;
+            margin-bottom: 4px; font-size: .78rem; color: rgba(255,255,255,.65);
+        }
+        .stat-label .stat-name { display:flex; align-items:center; gap:5px; }
+        .stat-label .stat-name i { width: 13px; text-align:center; }
+        .stat-val { font-weight: 600; color: #e8eaf0; font-size: .78rem; }
+
+        .stat-bar {
+            height: 7px;
+            border-radius: 99px;
+            background: rgba(255,255,255,.1);
+            overflow: hidden;
+        }
+        .stat-bar-fill {
             height: 100%;
+            border-radius: 99px;
+            transition: width .6s cubic-bezier(.4,0,.2,1), background-color .4s;
         }
-        .card-body {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
+        /* colores dinámicos por nivel */
+        .fill-ok   { background: linear-gradient(90deg, #22c55e, #4ade80); }
+        .fill-warn { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .fill-crit { background: linear-gradient(90deg, #ef4444, #f87171); }
+
+        .stat-na { color: rgba(255,255,255,.3); font-size:.75rem; text-align:center; padding: 2px 0; }
+
+        #statsRefreshDot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: #22c55e; display: inline-block;
+            margin-left: 6px; vertical-align: middle;
+            animation: pulse-dot 2s infinite;
         }
-        .card-body {
-            position: relative;
-            padding-bottom: 3.5rem; /* Espacio para el botón */
-        }
-        .card-body .btn {
-            position: absolute;
-            bottom: 1.25rem;
-            left: 50%;
-            transform: translateX(-50%);
-            white-space: nowrap;
-            margin-top: 1rem; /* Espacio adicional arriba del botón */
+        @keyframes pulse-dot {
+            0%,100% { opacity:1; } 50% { opacity:.35; }
         }
     </style>
     {% block extra_css %}{% endblock %}
@@ -112,9 +152,60 @@
                         <a class="nav-link" href="{{ url_for('main.configuracion') }}">Configuración</a>
                     </li>
                 </ul>
+                <!-- Botón de estadísticas -->
+                <div class="d-flex align-items-center">
+                    <button id="statsNavBtn" onclick="toggleStatsWidget()" title="Estadísticas del sistema">
+                        <i class="fas fa-chart-bar me-1"></i>Stats
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
+
+    <!-- ── Widget flotante de estadísticas ── -->
+    <div id="sysStatsWidget">
+        <div id="statsWidgetHeader">
+            <span><i class="fas fa-chart-bar me-2" style="color:#818cf8"></i>Sistema<span id="statsRefreshDot"></span></span>
+            <button id="statsWidgetClose" onclick="toggleStatsWidget()" title="Cerrar"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="statsWidgetBody">
+            <!-- CPU -->
+            <div class="stat-row" id="statRowCpu">
+                <div class="stat-label">
+                    <span class="stat-name"><i class="fas fa-microchip" style="color:#818cf8"></i>CPU</span>
+                    <span class="stat-val" id="statCpuVal">--%</span>
+                </div>
+                <div class="stat-bar"><div class="stat-bar-fill fill-ok" id="statCpuBar" style="width:0%"></div></div>
+            </div>
+            <!-- RAM -->
+            <div class="stat-row" id="statRowRam">
+                <div class="stat-label">
+                    <span class="stat-name"><i class="fas fa-memory" style="color:#34d399"></i>RAM</span>
+                    <span class="stat-val" id="statRamVal">--%</span>
+                </div>
+                <div class="stat-bar"><div class="stat-bar-fill fill-ok" id="statRamBar" style="width:0%"></div></div>
+            </div>
+            <!-- Disco -->
+            <div class="stat-row" id="statRowDisk">
+                <div class="stat-label">
+                    <span class="stat-name"><i class="fas fa-hdd" style="color:#fb923c"></i>Disco</span>
+                    <span class="stat-val" id="statDiskVal">--%</span>
+                </div>
+                <div class="stat-bar"><div class="stat-bar-fill fill-ok" id="statDiskBar" style="width:0%"></div></div>
+            </div>
+            <!-- GPU -->
+            <div class="stat-row" id="statRowGpu">
+                <div class="stat-label">
+                    <span class="stat-name"><i class="fas fa-bolt" style="color:#facc15"></i>GPU</span>
+                    <span class="stat-val" id="statGpuVal">--</span>
+                </div>
+                <div id="statGpuBarWrap">
+                    <div class="stat-bar"><div class="stat-bar-fill fill-ok" id="statGpuBar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-na d-none" id="statGpuNa">No disponible · selecciona GPU en Ajustes</div>
+            </div>
+        </div>
+    </div>
 
     <!-- Contenido principal -->
     <main class="container">
@@ -145,34 +236,148 @@
 
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-    <!-- Bootstrap JS y dependencias -->
+    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const cpuAlert = document.getElementById('cpu-warning-alert');
-
-            function checkCpuUsage() {
-                fetch('/api/system/stats')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success && data.cpu_percent > 75) {
-                            cpuAlert.classList.remove('d-none');
-                        } else {
-                            cpuAlert.classList.add('d-none');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error al verificar el uso de CPU:', error);
+    // ── Alertas de CPU ────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function() {
+        const cpuAlert = document.getElementById('cpu-warning-alert');
+        function checkCpuUsage() {
+            fetch('/api/system/stats')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success && data.cpu_percent > 75) {
+                        cpuAlert.classList.remove('d-none');
+                    } else {
                         cpuAlert.classList.add('d-none');
-                    });
-            }
+                    }
+                })
+                .catch(() => cpuAlert.classList.add('d-none'));
+        }
+        setInterval(checkCpuUsage, 5000);
+        checkCpuUsage();
+    });
 
-            // Verificar cada 5 segundos
-            setInterval(checkCpuUsage, 5000);
-            // Verificar al cargar la pagina
-            checkCpuUsage();
+    // ── Widget de estadísticas ────────────────────────────────────────────────
+    const widget   = document.getElementById('sysStatsWidget');
+    const navBtn   = document.getElementById('statsNavBtn');
+    let statsTimer = null;
+
+    function toggleStatsWidget() {
+        const visible = widget.classList.toggle('visible');
+        navBtn.classList.toggle('active', visible);
+        if (visible) {
+            fetchStats();
+            statsTimer = setInterval(fetchStats, 3000);
+        } else {
+            clearInterval(statsTimer);
+        }
+    }
+
+    function _fillColor(pct) {
+        if (pct >= 85) return 'fill-crit';
+        if (pct >= 60) return 'fill-warn';
+        return 'fill-ok';
+    }
+
+    function _updateBar(barId, valId, pct, label) {
+        const bar = document.getElementById(barId);
+        const val = document.getElementById(valId);
+        bar.style.width = Math.min(pct, 100) + '%';
+        bar.className   = 'stat-bar-fill ' + _fillColor(pct);
+        val.textContent = label;
+    }
+
+    function fetchStats() {
+        fetch('/api/system/stats')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) return;
+
+                // CPU
+                _updateBar('statCpuBar', 'statCpuVal', d.cpu_percent,
+                    d.cpu_percent.toFixed(1) + '%');
+
+                // RAM
+                _updateBar('statRamBar', 'statRamVal', d.ram_percent,
+                    d.ram_percent.toFixed(1) + '% (' + d.ram_used_gb + '/' + d.ram_total_gb + ' GB)');
+
+                // Disco
+                _updateBar('statDiskBar', 'statDiskVal', d.disk_percent,
+                    d.disk_percent.toFixed(1) + '% (' + d.disk_used_gb + '/' + d.disk_total_gb + ' GB)');
+
+                // GPU
+                const gpuBarWrap = document.getElementById('statGpuBarWrap');
+                const gpuNa      = document.getElementById('statGpuNa');
+                if (d.gpu_percent !== null && d.gpu_percent !== undefined) {
+                    gpuBarWrap.classList.remove('d-none');
+                    gpuNa.classList.add('d-none');
+                    const gpuLbl = d.gpu_label
+                        ? d.gpu_percent.toFixed(1) + '% · ' + d.gpu_label.replace('/dev/dri/', '')
+                        : d.gpu_percent.toFixed(1) + '%';
+                    _updateBar('statGpuBar', 'statGpuVal', d.gpu_percent, gpuLbl);
+                } else {
+                    gpuBarWrap.classList.add('d-none');
+                    gpuNa.classList.remove('d-none');
+                    document.getElementById('statGpuVal').textContent = 'N/A';
+                }
+            })
+            .catch(() => {});
+    }
+
+    // ── Drag & drop del widget ────────────────────────────────────────────────
+    (function() {
+        const handle = document.getElementById('statsWidgetHeader');
+        let dragging = false, ox = 0, oy = 0;
+
+        handle.addEventListener('mousedown', e => {
+            if (e.target.closest('#statsWidgetClose')) return;
+            dragging = true;
+            ox = e.clientX - widget.getBoundingClientRect().left;
+            oy = e.clientY - widget.getBoundingClientRect().top;
+            widget.style.right = 'auto';
+            e.preventDefault();
         });
+
+        document.addEventListener('mousemove', e => {
+            if (!dragging) return;
+            let nx = e.clientX - ox;
+            let ny = e.clientY - oy;
+            // Limitar dentro de la ventana
+            nx = Math.max(0, Math.min(window.innerWidth  - widget.offsetWidth,  nx));
+            ny = Math.max(0, Math.min(window.innerHeight - widget.offsetHeight, ny));
+            widget.style.left = nx + 'px';
+            widget.style.top  = ny + 'px';
+        });
+
+        document.addEventListener('mouseup', () => { dragging = false; });
+
+        // Touch support (móvil)
+        handle.addEventListener('touchstart', e => {
+            if (e.target.closest('#statsWidgetClose')) return;
+            const t = e.touches[0];
+            dragging = true;
+            ox = t.clientX - widget.getBoundingClientRect().left;
+            oy = t.clientY - widget.getBoundingClientRect().top;
+            widget.style.right = 'auto';
+        }, {passive:true});
+
+        document.addEventListener('touchmove', e => {
+            if (!dragging) return;
+            const t = e.touches[0];
+            let nx = Math.max(0, Math.min(window.innerWidth  - widget.offsetWidth,  t.clientX - ox));
+            let ny = Math.max(0, Math.min(window.innerHeight - widget.offsetHeight, t.clientY - oy));
+            widget.style.left = nx + 'px';
+            widget.style.top  = ny + 'px';
+        }, {passive:true});
+
+        document.addEventListener('touchend', () => { dragging = false; });
+    })();
     </script>
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>
+
+

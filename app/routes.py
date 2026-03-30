@@ -24,14 +24,74 @@ main_bp = Blueprint('main', __name__)
 
 @main_bp.route('/api/system/stats')
 def system_stats():
-    """Devuelve estadisticas del sistema como el uso de la CPU."""
+    """Devuelve estadísticas del sistema: CPU, RAM, disco y GPU."""
     try:
-        # Obtener el uso de la CPU. interval=0.5 para una medicion no bloqueante.
+        # CPU
         cpu_percent = psutil.cpu_percent(interval=0.5)
-        return jsonify({'success': True, 'cpu_percent': cpu_percent})
+
+        # RAM
+        mem = psutil.virtual_memory()
+        ram_percent = mem.percent
+        ram_used_gb = round(mem.used / (1024 ** 3), 1)
+        ram_total_gb = round(mem.total / (1024 ** 3), 1)
+
+        # Disco (partición raíz)
+        disk = psutil.disk_usage('/')
+        disk_percent = disk.percent
+        disk_used_gb = round(disk.used / (1024 ** 3), 1)
+        disk_total_gb = round(disk.total / (1024 ** 3), 1)
+
+        # GPU — intentar leer uso vía intel_gpu_top / nvidia-smi / fallback N/A
+        gpu_percent = None
+        gpu_label = None
+        try:
+            from .config_manager import config_manager
+            vcfg = config_manager.get_video_config()
+            if vcfg.get('hardware_accel') == 'gpu':
+                gpu_device = vcfg.get('gpu_device', '')
+                gpu_label = gpu_device
+
+                # Intentar nvidia-smi primero
+                r = subprocess.run(
+                    ['nvidia-smi', '--query-gpu=utilization.gpu',
+                     '--format=csv,noheader,nounits'],
+                    capture_output=True, text=True, timeout=2
+                )
+                if r.returncode == 0:
+                    gpu_percent = float(r.stdout.strip().split('\n')[0])
+                else:
+                    # Intentar intel_gpu_top (1 muestra, 100ms)
+                    r2 = subprocess.run(
+                        ['intel_gpu_top', '-s', '100', '-J'],
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if r2.returncode == 0:
+                        import json as _json
+                        jdata = _json.loads(r2.stdout)
+                        engines = jdata.get('engines', {})
+                        vals = [v.get('busy', 0) for v in engines.values()
+                                if isinstance(v, dict)]
+                        if vals:
+                            gpu_percent = round(sum(vals) / len(vals), 1)
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'cpu_percent': cpu_percent,
+            'ram_percent': ram_percent,
+            'ram_used_gb': ram_used_gb,
+            'ram_total_gb': ram_total_gb,
+            'disk_percent': disk_percent,
+            'disk_used_gb': disk_used_gb,
+            'disk_total_gb': disk_total_gb,
+            'gpu_percent': gpu_percent,
+            'gpu_label': gpu_label,
+        })
     except Exception as e:
-        logger.error(f"Error al obtener estadisticas del sistema: {e}")
+        logger.error(f"Error al obtener estadísticas del sistema: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 # Variable global para almacenar el hash de la lista M3U
 m3u_hash = None
